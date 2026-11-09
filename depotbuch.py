@@ -19,7 +19,7 @@ from pathlib import Path
 import requests
 from ruamel.yaml import YAML
 
-HELP = ("So meldet ihr Trades (Nachricht in diesen Kanal):\n"
+HELP = ("So meldet ihr Trades (einfach als Nachricht in den Kanal schreiben):\n"
         "kauf SAP 9  ·  kauf SAP 9 274,50\n"
         "verkauf Nvidia 20  ·  verkauf Nvidia alle 160\n"
         "budget 8000  ·  status\n"
@@ -34,26 +34,33 @@ def inbox_topic(topic: str) -> str:
 
 
 def fetch_inbox(server: str, topic: str, state: dict, log) -> list[dict]:
-    since = state.get("inbox_last") or "12h"
-    try:
-        r = requests.get(f"{server}/{inbox_topic(topic)}/json", params={"poll": "1", "since": since}, timeout=20)
-        r.raise_for_status()
-    except requests.RequestException as e:
-        log(f"Eingangskanal nicht lesbar: {e}")
-        return []
+    """Liest Befehle aus dem Hauptkanal (und dem alten -depot-Kanal).
+    Nachrichten des Bots haben immer einen Titel, Befehle von euch nicht – daran werden sie unterschieden."""
+    last = state.setdefault("inbox_last2", {})
     msgs = []
-    for line in r.text.splitlines():
+    for t in (topic, inbox_topic(topic)):
+        since = last.get(t) or "12h"
         try:
-            m = json.loads(line)
-        except json.JSONDecodeError:
+            r = requests.get(f"{server}/{t}/json", params={"poll": "1", "since": since}, timeout=20)
+            r.raise_for_status()
+        except requests.RequestException as e:
+            log(f"Kanal {t[-6:]} nicht lesbar: {e}")
             continue
-        if m.get("event") == "message" and m.get("message"):
-            msgs.append(m)
+        got = []
+        for line in r.text.splitlines():
+            try:
+                m = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if m.get("event") == "message":
+                got.append(m)
+        got.sort(key=lambda m: m.get("time", 0))
+        if got:
+            last[t] = got[-1]["id"]
+        elif t not in last:
+            last[t] = "now"
+        msgs += [m for m in got if m.get("message") and not m.get("title")]
     msgs.sort(key=lambda m: m.get("time", 0))
-    if msgs:
-        state["inbox_last"] = msgs[-1]["id"]
-    elif "inbox_last" not in state:
-        state["inbox_last"] = "now"  # beim allerersten Mal keine alten Nachrichten nachholen
     return msgs
 
 

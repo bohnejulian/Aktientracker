@@ -68,7 +68,7 @@ def notify(title: str, message: str, *, priority: int = 3, tags: list[str] | Non
     payload = {"topic": topic, "title": title, "message": message, "priority": priority}
     if actions and topic:
         payload["actions"] = [{"action": "http", "label": label[:40], "method": "POST", "clear": True,
-                               "url": f"{NTFY_SERVER}/{base}-depot", "body": body}
+                               "url": f"{NTFY_SERVER}/{base}", "body": body}
                               for label, body in actions[:3]]
     if tags:
         payload["tags"] = tags
@@ -755,7 +755,7 @@ def maybe_scan(depot: dict, state: dict, now: datetime, dry_run: bool, force: bo
     notify(f"💡 {len(ideas)} Kaufideen für heute", "\n\n".join(parts)
            + f"\n\nGeprüft: {len(universe)} Aktien aus DAX, MDAX, TecDAX, EuroStoxx50, Nasdaq 100, Dow. "
            "Bitte im Planspiel prüfen, ob die Aktie dort handelbar ist. Nach dem Kauf auf den Knopf tippen "
-           "(oder z. B. „kauf SAP 5“ in den Depot-Kanal schreiben), dann bucht der Bot es ein." + DISCLAIMER,
+           "(oder z. B. „kauf SAP 5“ in den Kanal schreiben), dann bucht der Bot es ein." + DISCLAIMER,
            priority=3, tags=["bulb"], actions=buttons, dry_run=dry_run)
 
 
@@ -808,7 +808,7 @@ def bot_update(depot: dict, quotes: dict, state: dict, now: datetime, dry_run: b
             f"gesamt {pct((total_v / total_c - 1) * 100) if total_c else '–'}"
             f" · freies Budget {eur(float(depot.get('budget') or 0))} €")
     notify(f"🤖 Bot-Käufe {now:%H:%M}", head + "\n\n" + "\n\n".join(blocks) + DISCLAIMER,
-           priority=1, tags=["robot"], channel="bot", dry_run=dry_run)
+           priority=1, tags=["robot"], dry_run=dry_run)
 
 
 # ---------------------------------------------------------------- Main
