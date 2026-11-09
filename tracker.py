@@ -978,6 +978,10 @@ def maybe_scan(depot: dict, state: dict, now: datetime, dry_run: bool, force: bo
         slot = now.replace(hour=h, minute=m, second=0, microsecond=0)
         if slot <= now < slot + timedelta(hours=2) and f"{today} {hhmm}" not in done:
             due = f"{today} {hhmm}"
+    test_n = None
+    if example and ":" in example:  # "DTE.DE:1" = Test-Idee mit fester Stückzahl und echtem Gekauft-Knopf
+        example, n_s = example.split(":", 1)
+        test_n = max(1, int(n_s))
     if not force and not due and not example:
         return
     if due:
@@ -1039,11 +1043,13 @@ def maybe_scan(depot: dict, state: dict, now: datetime, dry_run: bool, force: bo
         sent[i["t"]] = today
     stats = load_stats()
     for i in ideas:
+        if test_n:
+            i["n"] = test_n
         if example and i["kind"].startswith("Kein Signal"):
             i["kind"] = "Rücksetzer im Aufwärtstrend"  # nur zur Veranschaulichung, Bild sagt "Beispielzahlen"
         i["odds"] = idea_odds(i, stats)
-    if not example:
-      state["last_ideas"] = {i["t"]: {"name": i["name"], "price": i["price"],
+    if not example or test_n:
+      state["last_ideas"] = ({**(state.get("last_ideas") or {})} if test_n else {}) | {i["t"]: {"name": i["name"], "price": i["price"],
                                     **({"ziel_prozent": i["odds"]["best"]} if i.get("odds") and i["odds"]["best"] else {}),
                                     **({"sektor": i["sektor"]} if i.get("sektor") else {}),
                                     **({"heimat": i["t"]} if "." not in i["t"] else {})} for i in ideas}
@@ -1068,13 +1074,13 @@ def maybe_scan(depot: dict, state: dict, now: datetime, dry_run: bool, force: bo
         if i.get("klumpen"):
             body.append(f"⚠️ Ihr habt schon {i['klumpen'] * 100:.0f} % {i['sektor']}, das erhöht das Klumpenrisiko.")
         body.append(IDEA_NOTE.strip())
-        btn = [(f"Gekauft: {i['n']}× {i['name']}", f"kauf {i['t']} {i['n']}")] if i["n"] >= 1 and not example else None
+        btn = [(f"Gekauft: {i['n']}× {i['name']}", f"kauf {i['t']} {i['n']}")] if i["n"] >= 1 and (test_n or not example) else None
         try:
             img = ideacard.render(i, g, beispiel=bool(example))
         except Exception as e:  # noqa: BLE001
             log(f"Ideen-Bild fehlgeschlagen: {e}")
             img = None
-        notify(f"{'🧪 BEISPIEL – ' if example else '💡 '}Kaufidee: {i['name']}", "\n".join(body), priority=4, tags=["bulb"], actions=btn,
+        notify(f"{'🧪 TEST – ' if test_n else '🧪 BEISPIEL – ' if example else '💡 '}Kaufidee: {i['name']}", "\n".join(body), priority=4, tags=["bulb"], actions=btn,
                image=img,
                attach=None if img else chart_url({"closes": i["closes"], "dates": i["dates"]}, 504, f"{i['name']} – 2 Jahre",
                                                  [("Stop", i["stop"], "#dc2626")], sma200=True),
