@@ -74,11 +74,14 @@ def notify(title: str, message: str, *, priority: int = 3, tags: list[str] | Non
                                "url": f"{NTFY_SERVER}/{base}", "body": body}
                               for label, body in actions[:3]]
     melden = CFG.get("melden_url")
-    if melden and base and not channel and len(payload.get("actions") or []) < 3:
-        # Knopf zur Verkaufsseite: Kanal + Positionen stehen nur im #-Teil des Links (geht nie an einen Server)
+    # Knopf zur Verkaufsseite, nur mit den vom Bot vorgeschlagenen Käufen (bot: true).
+    # Kanal + Positionen stehen nur im #-Teil des Links (geht nie an einen Server)
+    pos = []
+    if melden and base and not channel:
         pos = [[p.get("ticker"), str(p.get("name", p.get("ticker")))[:28], _num_or(p.get("stueck")),
                 round((LAST_QUOTES.get(p.get("ticker")) or {}).get("price") or 0, 2)]
-               for p in DEPOT.get("positionen") or [] if p.get("ticker")]
+               for p in DEPOT.get("positionen") or [] if p.get("ticker") and p.get("bot")]
+    if melden and base and not channel and pos and len(payload.get("actions") or []) < 3:
         frag = urllib.parse.urlencode({"t": base, "p": json.dumps(pos, ensure_ascii=False, separators=(",", ":")),
                                        "b": round(float(DEPOT.get("budget") or 0), 2),
                                        "f": f"{CFG.get('gebuehr_prozent', 0.3)},{CFG.get('gebuehr_min', 15)}"},
