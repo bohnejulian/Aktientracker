@@ -84,6 +84,7 @@ def notify(title: str, message: str, *, priority: int = 3, tags: list[str] | Non
     if melden and base and not channel and pos and len(payload.get("actions") or []) < 3:
         frag = urllib.parse.urlencode({"t": base, "p": json.dumps(pos, ensure_ascii=False, separators=(",", ":")),
                                        "b": round(float(DEPOT.get("budget") or 0), 2),
+                                       "z": datetime.now(BERLIN).strftime("%d.%m. %H:%M"),
                                        "f": f"{CFG.get('gebuehr_prozent', 0.3)},{CFG.get('gebuehr_min', 15)}"},
                                       quote_via=urllib.parse.quote)
         payload.setdefault("actions", []).append({"action": "view", "label": "📝 Aktie verkaufen",
