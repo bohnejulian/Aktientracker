@@ -1213,6 +1213,14 @@ def main() -> int:
         return 0
 
     if args.test:
+        if os.environ.get("ANTHROPIC_API_KEY"):
+            pos = (depot.get("positionen") or [{}])[0]
+            sample = [(pos.get("name", "DAX"), f"{pos.get('name', 'DAX')}: Quartalszahlen über den Erwartungen", "", pos),
+                      ("DAX", "Wetter am Wochenende wird sonnig", "", None)]
+            r = ki_rate(depot, sample)
+            log(f"KI-Test: {'OK ' + json.dumps(r, ensure_ascii=False) if r else 'fehlgeschlagen'}")
+        else:
+            log("KI-Test: kein ANTHROPIC_API_KEY gesetzt")
         notify("✅ Tracker läuft!", "Testnachricht vom Aktien-Tracker.\n\n" + summary_text(depot, quotes),
                tags=["white_check_mark"], dry_run=args.dry_run)
         first = next((i for i in depot.get("positionen") or [] if quotes.get(i.get("ticker"))), None)
