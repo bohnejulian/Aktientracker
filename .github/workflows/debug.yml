@@ -9,10 +9,9 @@ jobs:
           python - <<'PY'
           import pandas as pd, requests, io
           H={"User-Agent":"aktientracker/1.0 (school project)"}
-          for p in ["DAX","MDAX","TecDAX","EURO_STOXX_50","Nasdaq-100","Dow_Jones_Industrial_Average"]:
-              html=requests.get(f"https://en.wikipedia.org/wiki/{p}",headers=H,timeout=30).text
+          for p in ["en:TecDAX","en:Nasdaq-100","en:Dow_Jones_Industrial_Average","de:TecDAX","de:MDAX"]:
+              lang,pg=p.split(":"); r=requests.get(f"https://{lang}.wikipedia.org/wiki/{pg}",headers=H,timeout=30); print(p,r.status_code,len(r.text)); html=r.text
               for i,t in enumerate(pd.read_html(io.StringIO(html))):
                   cols=[str(c) for c in t.columns]
-                  if any(k in " ".join(cols).lower() for k in ("ticker","symbol")):
-                      print(p,i,len(t),cols); print(t.head(3).to_string()[:600])
+                  if len(t)>=25: print(p,i,len(t),cols); print(t.head(2).to_string()[:400])
           PY
