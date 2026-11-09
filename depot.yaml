@@ -117,5 +117,5 @@ einstellungen:
   endspurt_tage: 14
   scan_uhrzeiten: ["09:30", "15:45"]   # Scan nach Xetra- und nach US-Eröffnung
   scan_anzahl: 2            # höchstens 2 Ideen pro Scan, nur wenn wirklich stark
-  scan_min_score: 20        # höher = strenger, weniger Meldungen
+  scan_min_score: 30        # Backtest 11/2026: erst ab ~30 klar besser als Zufall (20 Tage: +3,8 % statt +0,9 %)
   ki_min_relevanz: 3        # Meldungen unter dieser Relevanz (1–5) werden nicht geschickt

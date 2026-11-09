@@ -788,7 +788,7 @@ def maybe_scan(depot: dict, state: dict, now: datetime, dry_run: bool, force: bo
     budget = float(depot.get("budget") or 0)
     ideas = scanner.scan(universe, held, analyse, fx_rate, budget,
                          float(cfg.get("max_anteil_pro_kauf", 35)) / 100, log, 20)
-    min_score = float(cfg.get("scan_min_score", 20))
+    min_score = float(cfg.get("scan_min_score", 30))
     sent = state.setdefault("ideas_sent", {})
     for t in [t for t, d in sent.items() if (now.date() - datetime.fromisoformat(d).date()).days > 7]:
         del sent[t]
