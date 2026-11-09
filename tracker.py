@@ -1094,6 +1094,12 @@ def main() -> int:
     except Exception as e:  # noqa: BLE001
         log(f"Stuttgart-Kurse nicht abrufbar: {e}")
     log(f"{len(quotes)}/{len(tickers)} Kurse erhalten")
+    for p in depot.get("positionen") or []:
+        q = quotes.get(p.get("ticker"))
+        if q and p.get("kaufkurs") and q.get("prev_close"):
+            log(f"  {p['name']}: {q['price']:.2f} € ({q.get('quelle', p['ticker'])}), heute "
+                f"{(q['price'] / q['prev_close'] - 1) * 100:+.2f} %, seit Kauf "
+                f"{(q['price'] * float(p['stueck']) / cost_basis(p) - 1) * 100:+.2f} %")
 
     if args.scan:
         maybe_scan(depot, state, now, args.dry_run, force=True)
