@@ -1256,6 +1256,14 @@ def main() -> int:
         return 0
 
     if args.test:
+        for u in [CFG.get("melden_url"), "https://raw.githack.com/bohnejulian/aktientracker-verkauf/main/index.html",
+                  "https://cdn.jsdelivr.net/gh/bohnejulian/aktientracker-verkauf@main/index.html"]:
+            if u:
+                try:
+                    r = requests.get(u, timeout=15)
+                    log(f"Seiten-Test: {r.status_code} {r.headers.get('content-type')} {u}")
+                except requests.RequestException as e:
+                    log(f"Seiten-Test fehlgeschlagen {u}: {e}")
         if not args.dry_run:  # Selbsttest: kommen Bild + Knopf bei ntfy richtig an? (eigener Wegwerf-Kanal)
             try:
                 import base64, uuid
