@@ -121,6 +121,21 @@ def _find(positions, who: str):
     return None
 
 
+def _fee(doc, amount: float) -> float:
+    cfg = doc.get("einstellungen") or {}
+    return max(float(cfg.get("gebuehr_min", 15)), amount * float(cfg.get("gebuehr_prozent", 0.3)) / 100)
+
+
+def _cash(doc, delta: float) -> None:
+    if doc.get("barbestand") is not None:
+        doc["barbestand"] = round(float(doc["barbestand"]) + delta, 2)
+
+
+def _log_trade(state: dict, m: dict, text: str) -> None:
+    state.setdefault("trades", []).append({"t": m.get("time", 0), "text": text})
+    del state["trades"][:-50]
+
+
 def process(depot_file: Path, msgs: list[dict], state: dict, fetch_quotes, notify, summary, log, dry_run) -> bool:
     """Bucht alle Nachrichten. Gibt True zurück, wenn depot.yaml geändert wurde."""
     if not msgs:
@@ -194,11 +209,14 @@ def process(depot_file: Path, msgs: list[dict], state: dict, fetch_quotes, notif
                 if ticker in ideas and ideas[ticker].get("heimat"):
                     new["heimat"] = ideas[ticker]["heimat"]
                 positions.append(new)
-            doc["budget"] = round(max(0.0, budget - n * price), 2)
+            f = _fee(doc, n * price)
+            doc["budget"] = round(max(0.0, budget - n * price - f), 2)
+            _cash(doc, -(n * price + f))
             changed = True
-            notify(f"✅ Gebucht: {_int_or(n)} × {name}", f"Kauf à {_eur(price)} € = {_eur(n * price)} €\n"
-                   f"Freies Budget jetzt: {_eur(doc['budget'])} €", priority=2, tags=["white_check_mark"],
-                   dry_run=dry_run)
+            _log_trade(state, m, f"Kauf {_int_or(n)} × {name} à {_eur(price)} €")
+            notify(f"✅ Gebucht: {_int_or(n)} × {name}", f"Kauf à {_eur(price)} € = {_eur(n * price)} € "
+                   f"+ ~{_eur(f)} € Gebühr\nFreies Budget jetzt: {_eur(doc['budget'])} €", priority=2,
+                   tags=["white_check_mark"], dry_run=dry_run)
         else:
             if not pos:
                 notify("⚠️ Nicht im Depot", f"„{text}“: {cmd['wer']} steht nicht in eurem Depot.", priority=3,
@@ -208,17 +226,21 @@ def process(depot_file: Path, msgs: list[dict], state: dict, fetch_quotes, notif
             n = have if cmd["alle"] else min(cmd["stueck"] or 0, have)
             if not n:
                 continue
-            gain = (price - float(pos.get("kaufkurs", price))) * n
+            buy_k = float(pos.get("kaufkurs", price))
+            f = _fee(doc, n * price)
+            gain = (price - buy_k) * n - f - _fee(doc, n * buy_k)
             if n >= have:
                 positions.remove(pos)
                 rest = "Position komplett verkauft."
             else:
                 pos["stueck"] = _int_or(have - n)
                 rest = f"Noch {_int_or(have - n)} Stück im Depot."
-            doc["budget"] = round(budget + n * price, 2)
+            doc["budget"] = round(budget + n * price - f, 2)
+            _cash(doc, n * price - f)
             changed = True
+            _log_trade(state, m, f"Verkauf {_int_or(n)} × {name} à {_eur(price)} € ({'+' if gain >= 0 else ''}{_eur(gain)} € nach Gebühren)")
             notify(f"✅ Verkauf gebucht: {_int_or(n)} × {name}",
-                   f"à {_eur(price)} € = {_eur(n * price)} € ({'+' if gain >= 0 else ''}{_eur(gain)} € Gewinn/Verlust)\n"
+                   f"à {_eur(price)} € = {_eur(n * price)} € ({'+' if gain >= 0 else ''}{_eur(gain)} € Gewinn/Verlust nach Gebühren)\n"
                    f"{rest}\nFreies Budget jetzt: {_eur(doc['budget'])} €", priority=2, tags=["white_check_mark"],
                    dry_run=dry_run)
 

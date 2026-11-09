@@ -12,6 +12,10 @@
 # Er schlägt nie mehr vor, als hier frei ist. Nach einem Kauf bitte runtersetzen.
 budget: 10000
 
+# Aus dem Planspiel (Stand 09.11.2026 17:53): für Wochenrückblick und Endspurt
+startkapital: 50000
+barbestand: 14806.68
+
 positionen:
   - name: Deka Nasdaq-100 ETF
     isin: DE000ETFL623
@@ -105,6 +109,12 @@ einstellungen:
   auto_stop: true           # nachgezogener Stop-Loss-Alarm für Positionen ohne eigene 'unter'-Marke
   # KI-Bewertung der News: läuft nur, wenn im Repo das Secret ANTHROPIC_API_KEY gesetzt ist
   ki_modell: claude-haiku-5-5   # günstigstes Modell, ca. 0,0003 $ pro Bewertung
+  # Gebühren im Planspiel (aus eurem Depot zurückgerechnet: ca. 0,3 %, mind. ~15 € pro Trade)
+  gebuehr_prozent: 0.3
+  gebuehr_min: 15
+  # Spielende (ANNAHME, bitte prüfen!). Ab 14 Tagen vorher: Endspurt-Modus
+  spielende: "2027-01-20"
+  endspurt_tage: 14
   scan_uhrzeiten: ["09:30", "15:45"]   # Scan nach Xetra- und nach US-Eröffnung
   scan_anzahl: 2            # höchstens 2 Ideen pro Scan, nur wenn wirklich stark
   scan_min_score: 20        # höher = strenger, weniger Meldungen

@@ -183,6 +183,30 @@ def fetch_quotes(tickers: list[str]) -> dict[str, dict]:
     return quotes
 
 
+# ---------------------------------------------------------------- Gebühren & Endspurt
+
+def fee(amount: float, cfg: dict) -> float:
+    return max(float(cfg.get("gebuehr_min", 15)), amount * float(cfg.get("gebuehr_prozent", 0.3)) / 100)
+
+
+def min_trade(cfg: dict) -> float:
+    """Kleinster sinnvoller Kauf: Gebühren höchstens ~1 % des Betrags."""
+    return float(cfg.get("gebuehr_min", 15)) / 0.01
+
+
+def days_left(cfg: dict, now: datetime) -> int | None:
+    end = cfg.get("spielende")
+    if not end:
+        return None
+    return (datetime.fromisoformat(str(end)).date() - now.date()).days
+
+
+def endspurt(cfg: dict, now: datetime | None = None) -> int | None:
+    """Tage bis Spielende, wenn wir im Endspurt sind, sonst None."""
+    d = days_left(cfg, now or datetime.now(BERLIN))
+    return d if d is not None and 0 <= d <= int(cfg.get("endspurt_tage", 14)) else None
+
+
 # ---------------------------------------------------------------- Einschätzung
 
 def analyse(closes: list[float]) -> dict:
@@ -210,7 +234,7 @@ def analyse(closes: list[float]) -> dict:
     }
 
 
-def assessment(item: dict, q: dict, depot: dict) -> str:
+def assessment(item: dict, q: dict, depot: dict, allow_buy: bool = True) -> str:
     """Kurze, regelbasierte Einschätzung: Horizont, Signal, Betrag, Stop. Keine Anlageberatung."""
     a = analyse(q["closes"])
     p = q["price"]
@@ -289,17 +313,31 @@ def assessment(item: dict, q: dict, depot: dict) -> str:
     stop = stop_level(q)
     stop_pct = max(0.0, 1 - stop / p)
 
+    left = endspurt(cfg)
+    if left is not None and buy_ok and (vol >= 0.35 or not up_long):
+        buy_ok = False
+        why.append(f"Endspurt: Nur noch {left} Tage bis Spielende, da lohnt sich ein riskanter Neukauf kaum noch, "
+                   "weil für eine Erholung nach einem Rückschlag die Zeit fehlt.")
+    if not allow_buy:
+        buy_ok = False
     lines = [horizon, f"📌 {signal}"]
+    if left is not None:
+        lines.insert(0, f"🏁 Endspurt: noch {left} Tage – Gewinne sichern, Stops enger")
     if budget > 0 and buy_ok:
         amount = budget * share
         n = int(amount // p)
-        if n >= 1:
-            lines.append(f"💶 Falls Kauf: max. ~{eur(n * p)} {cur} ({n} Stk., {share * 100:.0f} % vom Budget {eur(budget)} €)")
+        if n >= 1 and n * p >= min_trade(cfg):
+            f2 = fee(n * p, cfg) * 2
+            lines.append(f"💶 Falls Kauf: max. ~{eur(n * p)} {cur} ({n} Stk., {share * 100:.0f} % vom Budget {eur(budget)} €)"
+                         f" · Gebühren hin+zurück ~{eur(f2)} € → lohnt ab {pct(f2 / (n * p) * 100)}")
         else:
-            lines.append(f"💶 Budget ({eur(budget)} €) reicht für keinen sinnvollen Kauf")
-    elif budget > 0:
+            lines.append(f"💶 Budget ({eur(budget)} €) reicht nicht für einen Kauf, der sich nach Gebühren lohnt")
+    elif budget > 0 and allow_buy:
         lines.append("💶 Aktuell kein Nachkauf vorgeschlagen")
-    lines.append(f"🛑 Stop-Loss: ~{eur(stop)} {cur} (−{stop_pct * 100:.0f} % vom Kurs) · Schwankung {risk} ({vol * 100:.0f} %/J.)")
+    if stop >= p:
+        lines.append(f"🛑 Stop-Loss ~{eur(stop)} {cur} ist unterschritten · Schwankung {risk} ({vol * 100:.0f} %/J.)")
+    else:
+        lines.append(f"🛑 Stop-Loss: ~{eur(stop)} {cur} (−{stop_pct * 100:.0f} % vom Kurs) · Schwankung {risk} ({vol * 100:.0f} %/J.)")
     if owned and item.get("kaufkurs"):
         lines.append(f"Seit Kauf: {pct((p / float(item['kaufkurs']) - 1) * 100)}")
     why.append(f"Einsatz und Stop-Abstand richten sich nach der Schwankung (~{vol * 100:.0f} % im Jahr): "
@@ -680,10 +718,16 @@ def check_earnings(depot: dict, state: dict, now: datetime, dry_run: bool) -> li
 
 # ---------------------------------------------------------------- Auto-Stop-Loss
 
+CFG: dict = {}
+
+
 def stop_level(q: dict) -> float:
-    """Nachgezogener Stop: höchster Schlusskurs der letzten 20 Tage minus schwankungsabhängiger Abstand."""
+    """Nachgezogener Stop: höchster Schlusskurs der letzten 20 Tage minus schwankungsabhängiger Abstand.
+    Im Endspurt halb so viel Abstand, um Gewinne zu sichern."""
     a = analyse(q["closes"])
     stop_pct = min(max(a["vol"] * 0.35, 0.05), 0.25)
+    if endspurt(CFG) is not None:
+        stop_pct = max(0.03, stop_pct * 0.5)
     return max(q["closes"][-20:] + [q["price"]]) * (1 - stop_pct)
 
 
@@ -703,7 +747,7 @@ def check_auto_stops(depot: dict, quotes: dict, state: dict, dry_run: bool) -> N
                    f"Kurs {eur(q['price'])} {q['currency']}"
                    + (f", seit Kauf {pct(loss)}" if loss is not None else "")
                    + ".\nDer Kurs ist deutlich unter sein jüngstes Hoch gefallen. Verkaufen, Teil verkaufen "
-                   "oder bewusst halten?\n\n" + assessment(item, q, depot) + DISCLAIMER,
+                   "oder bewusst halten?\n\n" + assessment(item, q, depot, allow_buy=False) + DISCLAIMER,
                    priority=5, tags=["octagonal_sign"],
                    actions=[("Alles verkauft", f"verkauf {t} alle"),
                             ("Hälfte verkauft", f"verkauf {t} {max(1, int(float(item.get('stueck', 2)) // 2))}")],
@@ -748,6 +792,14 @@ def maybe_scan(depot: dict, state: dict, now: datetime, dry_run: bool, force: bo
     sent = state.setdefault("ideas_sent", {})
     for t in [t for t, d in sent.items() if (now.date() - datetime.fromisoformat(d).date()).days > 7]:
         del sent[t]
+    left = endspurt(cfg, now)
+    if left is not None:
+        if left <= 5:
+            log("Endspurt: keine Neukäufe mehr")
+            return
+        min_score += 5
+        ideas = [i for i in ideas if i["vol"] < 0.35]
+    ideas = [i for i in ideas if i["n"] * i["price"] >= min_trade(cfg)]
     ideas = [i for i in ideas if i["score"] >= min_score and i["t"] not in sent][:int(cfg.get("scan_anzahl", 2))]
     log(f"Scan: {len(ideas)} starke neue Ideen (Schwelle {min_score})")
     if not ideas:
@@ -761,8 +813,10 @@ def maybe_scan(depot: dict, state: dict, now: datetime, dry_run: bool, force: bo
     for n, i in enumerate(ideas, 1):
         amount = (f"bis ~{eur(i['n'] * i['price'])} € ({i['n']} Stk. à ~{eur(i['price'])} €)" if i["n"] >= 1
                   else f"Kurs ~{eur(i['price'])} €, Budget reicht nicht")
+        f2 = fee(i["n"] * i["price"], cfg) * 2
         parts.append(f"{n}. {i['name']} ({i['idx']}) – {i['kind']}\n"
                      f"💶 {amount} · 🛑 Stop ~{eur(i['stop'])} € (−{i['stop_pct'] * 100:.0f} %)\n"
+                     f"🧾 Gebühren hin+zurück ~{eur(f2)} € → lohnt ab {pct(f2 / max(1, i['n'] * i['price']) * 100)}\n"
                      f"💡 {i['why']}")
     notify(f"💡 Starke Kaufidee{'n' if len(ideas) > 1 else ''}: " + ", ".join(i["name"] for i in ideas), "\n\n".join(parts)
            + f"\n\nGeprüft: {len(universe)} Aktien aus DAX, MDAX, TecDAX, EuroStoxx50, Nasdaq 100, Dow. "
@@ -836,6 +890,63 @@ def bot_update(depot: dict, quotes: dict, state: dict, now: datetime, dry_run: b
            priority=3, tags=["robot"], dry_run=dry_run)
 
 
+# ---------------------------------------------------------------- Wochenrückblick
+
+def weekly_review(depot: dict, quotes: dict, state: dict, now: datetime, dry_run: bool, force: bool = False) -> None:
+    """Sonntagabend: Woche des Depots gegen DAX und Nasdaq 100, Trades der Woche."""
+    week = now.strftime("%G-%V")
+    if not force and (now.weekday() != 6 or now.hour < 17 or state.get("review_week") == week):
+        return
+    state["review_week"] = week
+    import yfinance as yf
+
+    def wk(closes):
+        return closes[-1] / closes[-6] - 1 if len(closes) >= 6 else None
+
+    lines, val, diff = [], 0.0, 0.0
+    perf = []
+    for p in depot.get("positionen") or []:
+        q = quotes.get(p.get("ticker"))
+        if not q or len(q["closes"]) < 6:
+            continue
+        n = float(p.get("stueck", 0))
+        d = n * (q["closes"][-1] - q["closes"][-6])
+        val += n * q["price"]
+        diff += d
+        perf.append((wk(q["closes"]), d, p.get("name")))
+    my = diff / (val - diff) if val - diff else 0
+    bench = []
+    for sym, name in (("^GDAXI", "DAX"), ("^NDX", "Nasdaq 100")):
+        try:
+            c = [float(x) for x in yf.Ticker(sym).history(period="1mo")["Close"].dropna().tolist()]
+            bench.append((name, wk(c)))
+        except Exception as e:  # noqa: BLE001
+            log(f"Benchmark {name} fehlt: {e}")
+    lines.append(f"Eure Aktien diese Woche: {pct(my * 100)} ({'+' if diff >= 0 else ''}{eur(diff)} €)")
+    for name, b in bench:
+        if b is not None:
+            lines.append(f"{name}: {pct(b * 100)} → {'besser 💪' if my > b else 'schlechter'} als der Markt")
+    perf.sort(key=lambda x: -(x[0] or 0))
+    if perf:
+        lines.append(f"\n🥇 Beste: {perf[0][2]} {pct(perf[0][0] * 100)}")
+        lines.append(f"🥉 Schlechteste: {perf[-1][2]} {pct(perf[-1][0] * 100)}")
+    trades = [t for t in state.get("trades", []) if t["t"] >= now.timestamp() - 7 * 86400]
+    if trades:
+        lines.append("\nTrades der Woche:")
+        for t in trades:
+            lines.append(f"• {t['text']}")
+    start = float(depot.get("startkapital") or 0)
+    cash = float(depot.get("barbestand") or 0)
+    if start and cash:
+        total = val + cash
+        lines.append(f"\nGesamtdepot ca. {eur(total)} € ({pct((total / start - 1) * 100)} seit Start)"
+                     "")
+    left = days_left(depot.get("einstellungen") or {}, now)
+    if left is not None and left >= 0:
+        lines.append(f"🏁 Noch {left} Tage bis Spielende")
+    notify("📅 Wochenrückblick", "\n".join(lines), priority=3, tags=["calendar"], dry_run=dry_run)
+
+
 # ---------------------------------------------------------------- Main
 
 def main() -> int:
@@ -843,6 +954,7 @@ def main() -> int:
     ap.add_argument("--test", action="store_true", help="Test-Mitteilung + Übersicht senden")
     ap.add_argument("--dry-run", action="store_true", help="nichts senden, nur anzeigen")
     ap.add_argument("--scan", action="store_true", help="Kaufideen-Scan sofort ausführen")
+    ap.add_argument("--review", action="store_true", help="Wochenrückblick sofort schicken")
     args = ap.parse_args()
 
     state = load_state()
@@ -857,6 +969,8 @@ def main() -> int:
                              log, args.dry_run):
             log("depot.yaml aktualisiert")
     depot = yaml.safe_load(DEPOT_FILE.read_text()) or {}
+    CFG.clear()
+    CFG.update(depot.get("einstellungen") or {})
     resolve_symbols(depot, state)
     tickers = sorted({i["ticker"] for i in all_items(depot) if i.get("ticker")})
 
@@ -896,6 +1010,10 @@ def main() -> int:
         except Exception as e:  # noqa: BLE001
             log(f"Scan fehlgeschlagen: {e}")
     check_news(depot, quotes, state, now, args.dry_run)
+    try:
+        weekly_review(depot, quotes, state, now, args.dry_run, force=args.review)
+    except Exception as e:  # noqa: BLE001
+        log(f"Wochenrückblick fehlgeschlagen: {e}")
     if now.weekday() < 5 and 8 <= now.hour < 23:
         bot_update(depot, quotes, state, now, args.dry_run)
 
