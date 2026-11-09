@@ -61,11 +61,14 @@ def save_state(state: dict) -> None:
 
 def notify(title: str, message: str, *, priority: int = 3, tags: list[str] | None = None,
            click: str | None = None, actions: list[tuple[str, str]] | None = None,
-           channel: str = "", dry_run: bool = False) -> None:
+           channel: str = "", attach: str | None = None, dry_run: bool = False) -> None:
     """actions: [(Knopf-Text, Nachricht an den Eingangskanal)], max. 3. channel: z. B. "bot" -> <topic>-bot"""
     base = os.environ.get("NTFY_TOPIC")
     topic = f"{base}-{channel}" if base and channel else base
     payload = {"topic": topic, "title": title, "message": message, "priority": priority}
+    if attach:
+        payload["attach"] = attach
+        payload["filename"] = "chart.png"
     if actions and topic:
         payload["actions"] = [{"action": "http", "label": label[:40], "method": "POST", "clear": True,
                                "url": f"{NTFY_SERVER}/{base}", "body": body}
@@ -210,6 +213,53 @@ def endspurt(cfg: dict, now: datetime | None = None) -> int | None:
     return d if d is not None and 0 <= d <= int(cfg.get("endspurt_tage", 14)) else None
 
 
+# ---------------------------------------------------------------- Charts (Bild über quickchart.io)
+
+def chart_url(q: dict, days: int, title: str, lines: list[tuple[str, float, str]] = (), sma200: bool = False) -> str | None:
+    """Liniendiagramm der letzten `days` Handelstage als Bild-URL. lines: [(Beschriftung, Wert, Farbe)]."""
+    closes, dates = q.get("closes") or [], q.get("dates") or []
+    if len(closes) < 10:
+        return None
+    n = min(days, len(closes))
+    idx = list(range(len(closes) - n, len(closes)))
+    step = max(1, n // 60)
+    pick = idx[::step]
+    if pick[-1] != idx[-1]:
+        pick.append(idx[-1])
+
+    def lab(i):
+        d = dates[i] if i < len(dates) and dates[i] else ""
+        return f"{d[8:10]}.{d[5:7]}.{d[2:4]}" if len(d) == 10 else ""
+
+    ds = [{"label": "Kurs", "data": [round(closes[i], 2) for i in pick], "borderColor": "#2563eb",
+           "fill": False, "pointRadius": 0, "borderWidth": 2}]
+    if sma200 and len(closes) >= 200:
+        ds.append({"label": "200-Tage-Schnitt", "data": [round(sum(closes[max(0, i - 199):i + 1]) / min(200, i + 1), 2)
+                                                         if i >= 199 else None for i in pick],
+                   "borderColor": "#9ca3af", "borderDash": [4, 4], "fill": False, "pointRadius": 0, "borderWidth": 1})
+    for label, value, color in lines:
+        if value:
+            ds.append({"label": f"{label} {eur(value)}", "data": [round(value, 2)] * len(pick), "borderColor": color,
+                       "borderDash": [6, 3], "fill": False, "pointRadius": 0, "borderWidth": 1.5})
+    cfg = {"type": "line", "data": {"labels": [lab(i) for i in pick], "datasets": ds},
+           "options": {"title": {"display": True, "text": title},
+                       "legend": {"labels": {"boxWidth": 12, "fontSize": 11}},
+                       "scales": {"xAxes": [{"ticks": {"maxTicksLimit": 6, "maxRotation": 0}}]}}}
+    c = urllib.parse.quote(json.dumps(cfg, separators=(",", ":"), ensure_ascii=False))
+    return f"https://quickchart.io/chart?w=640&h=340&bkg=white&f=png&c={c}"
+
+
+def headline(item: dict, q: dict) -> str:
+    """Eine Zeile: Kurs · heute · (seit Kauf)."""
+    chg = (q["price"] / q["prev_close"] - 1) * 100
+    out = f"{eur(q['price'])} € · heute {pct(chg)}"
+    if item.get("stueck") and item.get("kaufkurs"):
+        n = float(item["stueck"])
+        diff = (q["price"] - q["prev_close"]) * n
+        out += f" ({'+' if diff >= 0 else ''}{eur(diff)} €) · seit Kauf {pct((q['price'] / float(item['kaufkurs']) - 1) * 100)}"
+    return out
+
+
 # ---------------------------------------------------------------- Einschätzung
 
 def analyse(closes: list[float]) -> dict:
@@ -229,7 +279,7 @@ def analyse(closes: list[float]) -> dict:
         losses += max(-d, 0)
     rsi = 100.0 if losses == 0 else 100 - 100 / (1 + gains / losses)
 
-    hi, lo = max(closes), min(closes)
+    hi, lo = max(closes[-252:]), min(closes[-252:])
     return {
         "sma50": sma(50), "sma200": sma(200), "rsi": rsi, "vol": vol,
         "hi": hi, "lo": lo, "pos52": (closes[-1] - lo) / (hi - lo) if hi > lo else 0.5,
@@ -238,114 +288,74 @@ def analyse(closes: list[float]) -> dict:
 
 
 def assessment(item: dict, q: dict, depot: dict, allow_buy: bool = True) -> str:
-    """Kurze, regelbasierte Einschätzung: Horizont, Signal, Betrag, Stop. Keine Anlageberatung."""
+    """Kompakte, regelbasierte Einschätzung (Trend, Signal, Kauf, Stop, ein Satz Warum). Keine Anlageberatung."""
     a = analyse(q["closes"])
     p = q["price"]
-    cur = q["currency"]
     cfg = depot.get("einstellungen") or {}
     budget = float(depot.get("budget") or 0)
     is_fund = item.get("art") in ("etf", "fonds")
-
     up_long = a["sma200"] is not None and p > a["sma200"] and (a["sma50"] or p) > a["sma200"]
     below_200 = a["sma200"] is not None and p < a["sma200"]
+    d200 = (p / a["sma200"] - 1) * 100 if a["sma200"] else 0
 
-    d200 = (p / a["sma200"] - 1) * 100 if a["sma200"] else None
-    why = []
-
-    # Horizont
     if is_fund:
-        horizon = "🕰 Langfristig (breit gestreut, Basisbaustein)"
-        why.append("Ein Fonds/ETF steckt in vielen Firmen gleichzeitig. Fällt eine, fangen die anderen das ab, "
-                   "deshalb schwankt er weniger und eignet sich zum Liegenlassen.")
+        trend, t_why = "🕰 langfristig halten (Fonds)", "Breit gestreut, schwankt weniger"
     elif up_long:
-        horizon = "🕰 Eher langfristig halten (stabiler Aufwärtstrend)"
-        why.append(f"Der Kurs liegt {d200:.0f} % über seinem Durchschnitt der letzten 200 Tage, und auch der "
-                   "50-Tage-Schnitt liegt darüber. Seit Monaten haben also die Käufer die Oberhand.")
+        trend, t_why = "↗ aufwärts – eher halten", f"{d200:.0f} % über dem 200-Tage-Schnitt"
     elif below_200:
-        horizon = "⚡ Eher kurzfristig/spekulativ (Abwärtstrend)"
-        why.append(f"Der Kurs liegt {abs(d200):.0f} % unter seinem 200-Tage-Durchschnitt. Seit Monaten überwiegen "
-                   "die Verkäufer, Erholungen sind in so einer Phase oft nur kurz.")
+        trend, t_why = "↘ abwärts – spekulativ", f"{abs(d200):.0f} % unter dem 200-Tage-Schnitt"
     else:
-        horizon = "↔️ Seitwärts, eher abwarten"
-        why.append("Der Kurs pendelt um seinen 200-Tage-Durchschnitt, es gibt keinen klaren Trend.")
+        trend, t_why = "→ seitwärts – abwarten", "Kein klarer Trend"
 
-    # Signal
     owned = bool(item.get("stueck"))
-    buy_ok = True
+    buy_ok, s_why = True, ""
     if a["rsi"] >= 70:
-        signal = f"Überkauft (RSI {a['rsi']:.0f}) – nicht hinterherkaufen" + (", Teilgewinn überlegen" if owned else "")
-        buy_ok = False
-        why.append("In den letzten 14 Handelstagen ging es fast nur nach oben. Nach so einem Lauf nehmen viele "
-                   "Anleger Gewinne mit, und der Kurs setzt oft zurück. Wer jetzt kauft, kauft teuer.")
+        sig = "überkauft" + (" – Teilgewinn möglich" if owned else " – nicht hinterherkaufen")
+        buy_ok, s_why = False, "14 Tage fast nur gestiegen, danach kommt oft ein Rücksetzer."
     elif a["rsi"] <= 30 and up_long:
-        signal = f"Rücksetzer im Aufwärtstrend (RSI {a['rsi']:.0f}) – mögliche Nachkauf-Chance"
-        why.append("Kurzfristig ist die Aktie stark gefallen, obwohl der langfristige Trend nach oben zeigt. "
-                   "Solche Dellen wurden in Aufwärtstrends oft wieder aufgeholt, man kauft also günstiger ein. "
-                   "Vorher prüfen, ob schlechte News dahinterstecken.")
+        sig = "Rücksetzer – Nachkauf möglich"
+        s_why = "Kurze Delle im Aufwärtstrend, die wurde oft wieder aufgeholt."
     elif a["rsi"] <= 30:
-        signal = f"Stark gefallen (RSI {a['rsi']:.0f}), Trend aber schwach – fallendes Messer, vorsichtig"
-        buy_ok = False
-        why.append("Die Aktie ist stark gefallen, und es gibt keinen Aufwärtstrend, der sie stützt. "
-                   "„Billig“ kann hier noch billiger werden.")
+        sig = "stark gefallen – Vorsicht"
+        buy_ok, s_why = False, "Gefallen ohne Aufwärtstrend als Stütze, kann weiter fallen."
     elif below_200:
-        signal = "Unter der 200-Tage-Linie – erst Bodenbildung abwarten"
-        buy_ok = False
-        why.append("Ein Kauf wäre eine Wette auf die Trendwende. Sicherer ist es zu warten, bis der Kurs wieder über "
-                   f"dem 200-Tage-Schnitt (~{eur(a['sma200'])}) steht.")
+        sig = "erst Bodenbildung abwarten"
+        buy_ok, s_why = False, f"Interessant erst wieder über {eur(a['sma200'])} €."
     elif a["pos52"] >= 0.95:
-        signal = "Nahe 52-Wochen-Hoch – Trend intakt, aber Einstieg teuer"
-        why.append(f"Sie steht fast auf dem höchsten Kurs des Jahres ({eur(a['hi'])}). Der Trend ist stark, "
-                   "aber bei einem Rückschlag gibt es wenig Puffer.")
+        sig = "nahe Jahreshoch"
+        s_why = "Trend stark, aber wenig Puffer nach unten."
     else:
-        signal = "Keine Auffälligkeit im Chart"
-        why.append("Sie ist weder überkauft noch überverkauft.")
-    if a["perf1m"] is not None and abs(a["perf1m"]) >= 0.1:
-        why.append(f"Im letzten Monat: {pct(a['perf1m'] * 100)}.")
+        sig = "unauffällig"
 
-    # Schwankung und Positionsgröße (je wilder, desto kleiner)
     vol = a["vol"]
-    if vol < 0.25:
-        risk, share = "niedrig", 0.35
-    elif vol < 0.40:
-        risk, share = "mittel", 0.25
-    elif vol < 0.60:
-        risk, share = "hoch", 0.15
-    else:
-        risk, share = "sehr hoch", 0.08
+    share = 0.35 if vol < 0.25 else 0.25 if vol < 0.40 else 0.15 if vol < 0.60 else 0.08
     share = min(share, float(cfg.get("max_anteil_pro_kauf", 35)) / 100)
-    stop = stop_level(q, item if item.get("stueck") else None)
-    stop_pct = max(0.0, 1 - stop / p)
+    stop = stop_level(q, item if owned else None)
 
     left = endspurt(cfg)
     if left is not None and buy_ok and (vol >= 0.35 or not up_long):
-        buy_ok = False
-        why.append(f"Endspurt: Nur noch {left} Tage bis Spielende, da lohnt sich ein riskanter Neukauf kaum noch, "
-                   "weil für eine Erholung nach einem Rückschlag die Zeit fehlt.")
+        buy_ok, s_why = False, "Zu wenig Zeit bis Spielende für riskante Käufe."
     if not allow_buy:
         buy_ok = False
-    lines = [horizon, f"📌 {signal}"]
+
+    lines = []
     if left is not None:
-        lines.insert(0, f"🏁 Endspurt: noch {left} Tage – Gewinne sichern, Stops enger")
-    if budget > 0 and buy_ok:
-        amount = budget * share
-        n = int(amount // p)
-        if n >= 1 and n * p >= min_trade(cfg):
-            f2 = fee(n * p, cfg) * 2
-            lines.append(f"💶 Falls Kauf: max. ~{eur(n * p)} {cur} ({n} Stk., {share * 100:.0f} % vom Budget {eur(budget)} €)"
-                         f" · Gebühren hin+zurück ~{eur(f2)} € → lohnt ab {pct(f2 / (n * p) * 100)}")
+        lines.append(f"🏁 Endspurt: noch {left} Tage")
+    lines.append(f"Trend:  {trend}")
+    lines.append(f"Signal: {sig}")
+    if budget > 0 and allow_buy:
+        n = int(budget * share // p)
+        if buy_ok and n >= 1 and n * p >= min_trade(cfg):
+            lines.append(f"Kauf:   bis ~{eur(n * p)} € ({n} Stk.)")
+        elif buy_ok:
+            lines.append("Kauf:   Budget zu klein (Gebühren)")
         else:
-            lines.append(f"💶 Budget ({eur(budget)} €) reicht nicht für einen Kauf, der sich nach Gebühren lohnt")
-    elif budget > 0 and allow_buy:
-        lines.append("💶 Aktuell kein Nachkauf vorgeschlagen")
+            lines.append("Kauf:   lieber nicht")
     if stop >= p:
-        lines.append(f"🛑 Stop-Loss ~{eur(stop)} {cur} ist unterschritten · Schwankung {risk} ({vol * 100:.0f} %/J.)")
+        lines.append(f"Stop:   {eur(stop)} € – unterschritten!")
     else:
-        lines.append(f"🛑 Stop-Loss: ~{eur(stop)} {cur} (−{stop_pct * 100:.0f} % vom Kurs) · Schwankung {risk} ({vol * 100:.0f} %/J.)")
-    if owned and item.get("kaufkurs"):
-        lines.append(f"Seit Kauf: {pct((p / float(item['kaufkurs']) - 1) * 100)}")
-    why.append(f"Einsatz und Stop-Abstand richten sich nach der Schwankung (~{vol * 100:.0f} % im Jahr): "
-               "je wilder, desto kleiner der Einsatz und desto mehr Luft bis zum Stop.")
-    lines.append("\n💡 Warum? " + " ".join(why))
+        lines.append(f"Stop:   {eur(stop)} € (−{(1 - stop / p) * 100:.0f} %)")
+    lines.append(f"💡 {t_why}." + (f" {s_why}" if s_why else ""))
     return "\n".join(lines)
 
 
@@ -360,7 +370,8 @@ def short_horizon(item: dict, q: dict) -> str:
     return "kurz"
 
 
-DISCLAIMER = "\n— Automatische Chart-Regeln, keine Anlageberatung."
+DISCLAIMER = ""
+IDEA_NOTE = "\nChart-Regeln, keine Anlageberatung."
 
 
 def check_prices(depot: dict, quotes: dict, state: dict, today: str, dry_run: bool) -> None:
@@ -390,15 +401,13 @@ def check_prices(depot: dict, quotes: dict, state: dict, today: str, dry_run: bo
             if level > moves.get(key, -1):
                 moves[key] = level
                 own = item.get("stueck")
-                extra = ""
-                if own:
-                    diff = (q["price"] - q["prev_close"]) * own
-                    extra = f"\nEure {own} Stück: {'+' if diff >= 0 else ''}{eur(diff)} {q['currency']} heute"
                 notify(f"{'📈' if chg > 0 else '📉'} {name} {pct(chg)}",
-                       f"Kurs {eur(q['price'])} {q['currency']} (Vortag {eur(q['prev_close'])}){extra}\n\n"
-                       + assessment(item, q, depot) + DISCLAIMER,
+                       headline(item, q) + "\n\n" + assessment(item, q, depot),
                        priority=4 if abs(chg) >= first + step else 3,
                        tags=["chart_with_upwards_trend" if chg > 0 else "chart_with_downwards_trend"],
+                       attach=chart_url(q, 63, f"{name} – 3 Monate",
+                                        [("Kauf", float(item["kaufkurs"]) if own and item.get("kaufkurs") else 0, "#16a34a"),
+                                         ("Stop", stop_level(q, item) if own else 0, "#dc2626")]),
                        click=link, dry_run=dry_run)
 
         # 2) Selbst gesetzte Kursmarken (Alarm beim Reißen, wieder scharf beim Zurückkommen)
@@ -410,14 +419,15 @@ def check_prices(depot: dict, quotes: dict, state: dict, today: str, dry_run: bo
             hit = cond(q["price"], float(mark))
             if hit and not targets.get(key):
                 is_goal = kind == "ueber" and item.get("ziel_prozent")
-                intro = (f"Gewinnziel +{item['ziel_prozent']} % erreicht! Laut Backtest war Verkaufen hier im Schnitt "
-                         "besser als Weiterhalten. Gewinn mitnehmen oder bewusst laufen lassen (dann Stop eng nachziehen).\n"
+                intro = (f"Ziel +{item['ziel_prozent']} % erreicht. Im Backtest war Verkaufen hier besser als Halten.\n"
                          if is_goal else "")
                 own = item.get("stueck")
                 notify(f"🎯 {name} {'über' if kind == 'ueber' else 'unter'} {eur(float(mark))}"
                        + (" – Gewinnziel!" if is_goal else ""),
-                       intro + f"Aktuell {eur(q['price'])} {q['currency']} ({pct(chg)} heute)\n\n"
-                       + assessment(item, q, depot, allow_buy=not is_goal) + DISCLAIMER,
+                       intro + headline(item, q) + "\n\n" + assessment(item, q, depot, allow_buy=not is_goal),
+                       attach=chart_url(q, 126, f"{name} – 6 Monate",
+                                        [("Kauf", float(item["kaufkurs"]) if own and item.get("kaufkurs") else 0, "#16a34a"),
+                                         ("Marke", float(mark), "#f59e0b")]),
                        priority=5 if kind == "unter" or is_goal else 4, tags=["dart"],
                        actions=([("Alles verkauft", f"verkauf {t} alle"),
                                  ("Hälfte verkauft", f"verkauf {t} {max(1, int(float(own) // 2))}")] if own else None),
@@ -446,15 +456,13 @@ def summary_text(depot: dict, quotes: dict) -> str:
         total_cost += cost
         day_diff += (q["price"] - q["prev_close"]) * n
         perf = (value / cost - 1) * 100 if cost else 0
-        lines.append(f"{name}: {eur(q['price'])} ({pct((q['price'] / q['prev_close'] - 1) * 100)} heute, "
-                     f"{pct(perf)} seit Kauf) [{short_horizon(p, q)}]"
-                     + (f" Stop {eur(float(p['unter']) if p.get('unter') is not None else stop_level(q, p))}"
-                        if (depot.get("einstellungen") or {}).get("auto_stop", True) or p.get("unter") is not None else ""))
+        lines.append(f"{name}: {eur(q['price'])} € · {pct((q['price'] / q['prev_close'] - 1) * 100)} · "
+                     f"ges. {pct(perf)}")
         weights.append((value, name))
     if total_cost:
         lines.append("")
-        lines.append(f"Depotwert: {eur(total_value)}  |  heute {'+' if day_diff >= 0 else ''}{eur(day_diff)}  |  "
-                     f"gesamt {pct((total_value / total_cost - 1) * 100)}")
+        lines.insert(0, f"Aktien: {eur(total_value)} € · heute {'+' if day_diff >= 0 else ''}{eur(day_diff)} € · "
+                        f"gesamt {pct((total_value / total_cost - 1) * 100)}\n")
         big = [f"{n} {v / total_value * 100:.0f} %" for v, n in sorted(weights, reverse=True) if v / total_value > 0.2]
         if big:
             lines.append("⚠️ Klumpenrisiko: " + ", ".join(big) + " vom Depot")
@@ -579,8 +587,7 @@ def check_news(depot: dict, quotes: dict, state: dict, now: datetime, dry_run: b
             prio = 4 if r["relevanz"] >= 5 else 3
         q = quotes.get(item.get("ticker")) if item else None
         if q:
-            chg = (q["price"] / q["prev_close"] - 1) * 100
-            msg += f"\n\nKurs {eur(q['price'])} {q['currency']} ({pct(chg)} heute)\n" + assessment(item, q, depot) + DISCLAIMER
+            msg += f"\n\n{headline(item, q)}\n" + "\n".join(assessment(item, q, depot).split("\n")[:2])
         notify(f"📰 {label}", msg, priority=prio, tags=["newspaper"], click=link, dry_run=dry_run)
     if len(fresh) > budget:
         notify("📰 Weitere News", f"{len(fresh) - budget} weitere Meldungen, z. B.: "
@@ -758,13 +765,12 @@ def check_auto_stops(depot: dict, quotes: dict, state: dict, dry_run: bool) -> N
             continue  # eigene Marke hat Vorrang
         stop = stop_level(q, item)
         if q["price"] <= stop and not armed.get(t):
-            loss = (q["price"] / float(item["kaufkurs"]) - 1) * 100 if item.get("kaufkurs") else None
-            notify(f"🛑 {item.get('name', t)} unter Stop-Loss {eur(stop)}",
-                   f"Kurs {eur(q['price'])} {q['currency']}"
-                   + (f", seit Kauf {pct(loss)}" if loss is not None else "")
-                   + ".\nDer Kurs ist deutlich unter sein jüngstes Hoch gefallen. Verkaufen, Teil verkaufen "
-                   "oder bewusst halten?\n\n" + assessment(item, q, depot, allow_buy=False) + DISCLAIMER,
+            notify(f"🛑 {item.get('name', t)} unter Stop {eur(stop)}",
+                   headline(item, q) + "\nVerkaufen, Teil verkaufen oder bewusst halten?\n\n"
+                   + assessment(item, q, depot, allow_buy=False),
                    priority=5, tags=["octagonal_sign"],
+                   attach=chart_url(q, 126, f"{item.get('name', t)} – 6 Monate",
+                                    [("Kauf", float(item.get("kaufkurs") or 0), "#16a34a"), ("Stop", stop, "#dc2626")]),
                    actions=[("Alles verkauft", f"verkauf {t} alle"),
                             ("Hälfte verkauft", f"verkauf {t} {max(1, int(float(item.get('stueck', 2)) // 2))}")],
                    click=f"https://finance.yahoo.com/quote/{urllib.parse.quote(t)}", dry_run=dry_run)
@@ -868,22 +874,32 @@ def maybe_scan(depot: dict, state: dict, now: datetime, dry_run: bool, force: bo
     state["last_ideas"] = {i["t"]: {"name": i["name"], "price": i["price"],
                                     **({"ziel_prozent": i["odds"]["best"]} if i.get("odds") and i["odds"]["best"] else {}),
                                     **({"heimat": i["t"]} if "." not in i["t"] else {})} for i in ideas}
-    buttons = [(f"Gekauft: {i['n']}× {i['name']}", f"kauf {i['t']} {i['n']}") for i in ideas if i["n"] >= 1][:3]
-    parts = []
-    for n, i in enumerate(ideas, 1):
-        amount = (f"bis ~{eur(i['n'] * i['price'])} € ({i['n']} Stk. à ~{eur(i['price'])} €)" if i["n"] >= 1
-                  else f"Kurs ~{eur(i['price'])} €, Budget reicht nicht")
+    for i in ideas:
         f2 = fee(i["n"] * i["price"], cfg) * 2
-        parts.append(f"{n}. {i['name']} ({i['idx']}) – {i['kind']}\n"
-                     f"💶 {amount} · 🛑 Stop ~{eur(i['stop'])} € (−{i['stop_pct'] * 100:.0f} %)\n"
-                     f"🧾 Gebühren hin+zurück ~{eur(f2)} € → lohnt ab {pct(f2 / max(1, i['n'] * i['price']) * 100)}\n"
-                     f"💡 {i['why']}"
-                     + (f"\n{odds_text(i['odds'], i['price'])}" if i.get("odds") else ""))
-    notify(f"💡 Starke Kaufidee{'n' if len(ideas) > 1 else ''}: " + ", ".join(i["name"] for i in ideas), "\n\n".join(parts)
-           + f"\n\nGeprüft: {len(universe)} Aktien aus DAX, MDAX, TecDAX, EuroStoxx50, Nasdaq 100, Dow. "
-           "Bitte im Planspiel prüfen, ob die Aktie dort handelbar ist. Nach dem Kauf auf den Knopf tippen "
-           "(oder z. B. „kauf SAP 5“ in den Kanal schreiben), dann bucht der Bot es ein." + DISCLAIMER,
-           priority=4, tags=["bulb"], actions=buttons, dry_run=dry_run)
+        body = [f"{i['kind']} · {i['idx']}",
+                f"Kauf:   bis ~{eur(i['n'] * i['price'])} € ({i['n']} Stk. à {eur(i['price'])} €)" if i["n"] >= 1
+                else f"Kurs:   {eur(i['price'])} € (Budget zu klein)",
+                f"Stop:   {eur(i['stop'])} € (−{i['stop_pct'] * 100:.0f} %)",
+                f"Gebühr: ~{eur(f2)} € hin+zurück"]
+        g = i.get("odds")
+        if g:
+            best = g["best"]
+            t = g["targets"][str(best)]
+            ch = " · ".join(f"+{x}%: {g['targets'][str(x)]['p_ziel'] * 100:.0f}%" for x in (5, 10, 20) if str(x) in g["targets"])
+            body.append("")
+            body.append(f"📊 Früher ({g['n']} ähnliche Fälle):")
+            body.append(f"Chance auf {ch}")
+            body.append(f"Stop gerissen: {t['p_stop'] * 100:.0f}% · Ø {pct(t['ev'] * 100)}/Trade")
+            body.append(f"👉 Verkaufen: bei +{best} % (~{eur(i['price'] * (1 + best / 100))} €)" if best
+                        else "👉 Verkaufen: kein festes Ziel, Stop nachziehen lassen")
+        body.append("")
+        body.append(f"💡 {i['why'].split('. ')[0].rstrip('.')}.")
+        body.append(IDEA_NOTE.strip())
+        btn = [(f"Gekauft: {i['n']}× {i['name']}", f"kauf {i['t']} {i['n']}")] if i["n"] >= 1 else None
+        notify(f"💡 Kaufidee: {i['name']}", "\n".join(body), priority=4, tags=["bulb"], actions=btn,
+               attach=chart_url({"closes": i["closes"], "dates": i["dates"]}, 504, f"{i['name']} – 2 Jahre",
+                                [("Stop", i["stop"], "#dc2626")], sma200=True),
+               click=f"https://finance.yahoo.com/quote/{urllib.parse.quote(i['t'])}", dry_run=dry_run)
 
 
 # ---------------------------------------------------------------- Bot-Kanal
@@ -1050,7 +1066,17 @@ def main() -> int:
         first = next((i for i in depot.get("positionen") or [] if quotes.get(i.get("ticker"))), None)
         if first:
             q = quotes[first["ticker"]]
-            notify(f"🔎 Beispiel-Einschätzung: {first.get('name')}", assessment(first, q, depot) + DISCLAIMER,
+            url = chart_url(q, 252, f"{first.get('name')} – 1 Jahr",
+                            [("Kauf", float(first.get("kaufkurs") or 0), "#16a34a"), ("Stop", stop_level(q, first), "#dc2626")],
+                            sma200=True)
+            if not args.dry_run:
+                try:
+                    r = requests.get(url, timeout=20)
+                    log(f"Chart-Test: HTTP {r.status_code}, {r.headers.get('content-type')}, {len(r.content)} Bytes, URL {len(url)} Zeichen")
+                except requests.RequestException as e:
+                    log(f"Chart-Test fehlgeschlagen: {e}")
+            notify(f"🔎 Beispiel: {first.get('name')}", headline(first, q) + "\n\n" + assessment(first, q, depot),
+                   attach=url,
                    tags=["mag"], dry_run=args.dry_run)
         save_state(state)
         return 0

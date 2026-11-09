@@ -122,14 +122,16 @@ def scan(universe: dict, held: set[str], analyse, fx_rate, budget: float, max_sh
     import yfinance as yf
 
     tickers = sorted(universe)
-    data = yf.download(tickers, period="1y", interval="1d", group_by="ticker",
+    data = yf.download(tickers, period="2y", interval="1d", group_by="ticker",
                        auto_adjust=False, progress=False, threads=True)
     ideas = []
     for t in tickers:
         if t in held:
             continue
         try:
-            closes = [float(c) for c in data[t]["Close"].dropna().tolist()]
+            cl = data[t]["Close"].dropna()
+            closes = [float(c) for c in cl.tolist()]
+            dates = [d.strftime("%Y-%m-%d") if hasattr(d, "strftime") else "" for d in cl.index]
         except Exception:  # noqa: BLE001
             continue
         if len(closes) < 210:
@@ -152,7 +154,9 @@ def scan(universe: dict, held: set[str], analyse, fx_rate, budget: float, max_sh
                 p_eur = p / rate
         n = int(budget * share // p_eur) if budget else 0
         stop_pct = min(max(vol * 0.35, 0.05), 0.25)
+        fx = p_eur / p if p else 1
         ideas.append({"t": t, "name": name, "idx": idx, "kind": kind, "why": why, "score": score,
+                      "closes": [c * fx for c in closes], "dates": dates,
                       "price": p_eur, "n": n, "share": share, "stop": p_eur * (1 - stop_pct),
                       "stop_pct": stop_pct, "vol": vol})
     ideas.sort(key=lambda x: -x["score"])
