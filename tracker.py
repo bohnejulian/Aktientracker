@@ -1213,11 +1213,11 @@ def weekly_review(depot: dict, quotes: dict, state: dict, now: datetime, dry_run
 # ---------------------------------------------------------------- Main
 
 def heartbeat(depot: dict, quotes: dict, state: dict, now: datetime, dry_run: bool) -> None:
-    """Alle 30 Min. (7–23 Uhr) ein leises „Bot läuft“ mit Verkaufen-Knopf."""
+    """Alle paar Stunden (7–23 Uhr) ein leises „Bot läuft“ mit Verkaufen-Knopf."""
     every = int(CFG.get("lebenszeichen_minuten", 30) or 0)
     if not every:
         return
-    slot = now.strftime("%Y-%m-%d ") + f"{now.hour:02d}:{(now.minute // every) * every:02d}"
+    slot = now.strftime("%Y-%m-%d ") + str((now.hour * 60 + now.minute) // every)
     if state.get("heartbeat_slot") == slot:
         return
     state["heartbeat_slot"] = slot

@@ -145,7 +145,7 @@ einstellungen:
   news_max_alter_stunden: 6 # ältere Artikel werden ignoriert
   uebersicht_uhrzeiten: ["09:15", "17:45"]   # Depot-Übersicht (deutsche Zeit)
   melden_url: "https://raw.githack.com/bohnejulian/aktientracker-verkauf/main/index.html"  # Seite hinter dem Knopf „Aktie verkaufen“
-  lebenszeichen_minuten: 30  # leises „Bot läuft“ mit Verkaufen-Knopf (0 = aus)
+  lebenszeichen_minuten: 120  # leises „Bot läuft“ mit Verkaufen-Knopf (0 = aus)
   max_sektor_prozent: 50    # Warnung, wenn eine Branche mehr als 50 % des Depots ausmacht
   max_anteil_pro_kauf: 35   # nie mehr als 35 % des Budgets in einen Kauf (wenige, gute Trades)
   auto_stop: true           # nachgezogener Stop-Loss-Alarm für Positionen ohne eigene 'unter'-Marke
