@@ -1,0 +1,19 @@
+name: debug
+on: workflow_dispatch
+jobs:
+  d:
+    runs-on: ubuntu-latest
+    steps:
+      - run: pip install -q yfinance
+      - run: |
+          python - <<'PY'
+          import yfinance as yf
+          for q in ["Deka Nasdaq-100", "Deka Technologie", "ETFL62", "515262", "Deka-Technologie CF"]:
+              try: print(q, [(x.get("symbol"), x.get("exchange"), x.get("quoteType")) for x in yf.Search(q, max_results=15, news_count=0).quotes])
+              except Exception as e: print(q, e)
+          for s in ["D6RG.F","DE000ETFL623.SG","EL4R.DE","ELFA.DE","EL4X.DE","0P00000AXG.F","EURUSD=X","NVD.DE","FB2A.DE","PTX.DE","F3A.DE"]:
+              try:
+                  h=yf.Ticker(s).history(period="3mo")["Close"].dropna()
+                  print(s, len(h), h.iloc[-1] if len(h) else None, yf.Ticker(s).fast_info.get("currency"))
+              except Exception as e: print(s, "ERR", e)
+          PY

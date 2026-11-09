@@ -122,12 +122,29 @@ def resolve_symbols(depot: dict, state: dict) -> None:
         ordered += [s for s in symbols if s not in ordered]
         log(f"{item.get('name', isin)}: Kandidaten {symbols}")
         pick = next((s for s in ordered if _has_eur_data(yf, s)), None)
+        if not pick:
+            # z. B. US-Aktien: Heimatbörse nehmen und später in € umrechnen
+            pick = next((s for s in ordered if "." not in s), None)
         if pick:
             log(f"{item.get('name', isin)}: {isin} -> {pick}")
             cache[isin] = pick
             item["ticker"] = pick
         else:
             log(f"Kein €-Kurs für {item.get('name', isin)} ({isin}) gefunden – bitte 'ticker' in depot.yaml eintragen")
+
+
+_FX: dict[str, float | None] = {}
+
+
+def fx_rate(cur: str) -> float | None:
+    if cur not in _FX:
+        import yfinance as yf
+        try:
+            _FX[cur] = float(yf.Ticker(f"EUR{cur}=X").history(period="5d")["Close"].dropna().iloc[-1])
+        except Exception as e:  # noqa: BLE001
+            log(f"Wechselkurs EUR/{cur} nicht abrufbar: {e}")
+            _FX[cur] = None
+    return _FX[cur]
 
 
 def fetch_quotes(tickers: list[str]) -> dict[str, dict]:
@@ -146,6 +163,11 @@ def fetch_quotes(tickers: list[str]) -> dict[str, dict]:
                 currency = tk.fast_info.get("currency") or ""
             except Exception:  # noqa: BLE001
                 currency = ""
+            if currency and currency.upper() != "EUR":
+                rate = fx_rate(currency.upper())  # 1 € = rate Fremdwährung
+                if rate:
+                    closes = [c / rate for c in closes]
+                    currency = "EUR"
             quotes[t] = {"price": closes[-1], "prev_close": closes[-2],
                          "currency": "€" if currency.upper() == "EUR" else currency, "closes": closes}
         except Exception as e:  # noqa: BLE001 – Yahoo wirft alles Mögliche
@@ -393,6 +415,10 @@ def news_queries(depot: dict) -> list[tuple[str, str]]:
     return out
 
 
+# Werbung für Hebelprodukte u. Ä. rausfiltern
+NEWS_JUNK = ("turbo", "optionsschein", "knock-out", "open end", "faktor-zertifikat", "mini future", "discount-zertifikat")
+
+
 def google_news_url(query: str) -> str:
     q = urllib.parse.quote(f"{query} when:1d")
     return f"https://news.google.com/rss/search?q={q}&hl=de&gl=DE&ceid=DE:de"
@@ -419,7 +445,7 @@ def check_news(depot: dict, quotes: dict, state: dict, now: datetime, dry_run: b
             # von mehreren Seiten nur einmal kommt
             core = title.rsplit(" - ", 1)[0].lower()
             key = hashlib.sha1(core.encode()).hexdigest()[:16]
-            if key in seen:
+            if key in seen or any(w in core for w in NEWS_JUNK):
                 continue
             seen[key] = now.timestamp()
             if first_time:
