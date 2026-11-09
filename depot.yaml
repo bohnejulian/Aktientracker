@@ -2,10 +2,9 @@
 #  EUER DEPOT – hier nach jedem Kauf/Verkauf anpassen
 #  Stand: 09.11.2026 17:26 (aus dem Planspiel übernommen)
 # ============================================================
-# isin:   steht im Planspiel unter dem Namen. Der Tracker sucht sich damit
-#         selbst den Kurs (bevorzugt Börse Stuttgart, wie im Planspiel).
-# ticker: optional. Nur eintragen, wenn die ISIN-Suche den falschen Kurs findet
-#         (Yahoo-Kürzel, z. B. RHM.SG = Rheinmetall in Stuttgart).
+# isin:   steht im Planspiel unter dem Namen. 
+# ticker: Yahoo-Kürzel für den €-Kurs (z. B. NVD.DE = Nvidia an Xetra). Bei neuen Aktien
+#         weglassen, dann sucht der Tracker über die ISIN selbst (US-Kurse rechnet er in € um).
 # news:   Suchbegriff für Nachrichten.
 # ueber / unter: optionale Kursmarken in €. Wird die Marke gerissen, gibt es einen Alarm.
 
@@ -16,6 +15,7 @@ budget: 10000
 positionen:
   - name: Deka Nasdaq-100 ETF
     isin: DE000ETFL623
+    ticker: D6RH.DE
     stueck: 55
     kaufkurs: 170.88
     news: Nasdaq 100
@@ -23,6 +23,7 @@ positionen:
 
   - name: Deka-Technologie CF
     isin: DE0005152623
+    ticker: 0P00000EK2.F
     stueck: 30
     kaufkurs: 123.67
     news: Technologieaktien
@@ -30,42 +31,49 @@ positionen:
 
   - name: First Solar
     isin: US3364331070
+    ticker: F3A.DE
     stueck: 5
     kaufkurs: 178.00
     news: First Solar
 
   - name: Lufthansa
     isin: DE0008232125
+    ticker: LHA.DE
     stueck: 10
     kaufkurs: 8.54
     news: Lufthansa
 
   - name: Meta
     isin: US30303M1027
+    ticker: FB2A.DE
     stueck: 10
     kaufkurs: 550.10
     news: Meta Platforms
 
   - name: Nvidia
     isin: US67066G1040
+    ticker: NVD.DE
     stueck: 45
     kaufkurs: 158.60
     news: Nvidia
 
   - name: Palantir
     isin: US69608A1088
+    ticker: PTX.DE
     stueck: 10
     kaufkurs: 151.76
     news: Palantir
 
   - name: Rheinmetall
     isin: DE0007030009
+    ticker: RHM.DE
     stueck: 7
     kaufkurs: 822.70
     news: Rheinmetall
 
   - name: Take-Two Interactive
     isin: US8740541094
+    ticker: TKE.DE
     stueck: 5
     kaufkurs: 194.90
     news: Take-Two
