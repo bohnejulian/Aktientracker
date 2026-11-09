@@ -1212,6 +1212,27 @@ def weekly_review(depot: dict, quotes: dict, state: dict, now: datetime, dry_run
 
 # ---------------------------------------------------------------- Main
 
+def heartbeat(depot: dict, quotes: dict, state: dict, now: datetime, dry_run: bool) -> None:
+    """Alle 30 Min. (7–23 Uhr) ein leises „Bot läuft“ mit Verkaufen-Knopf."""
+    every = int(CFG.get("lebenszeichen_minuten", 30) or 0)
+    if not every:
+        return
+    slot = now.strftime("%Y-%m-%d ") + f"{now.hour:02d}:{(now.minute // every) * every:02d}"
+    if state.get("heartbeat_slot") == slot:
+        return
+    state["heartbeat_slot"] = slot
+    bot = [p for p in depot.get("positionen") or [] if p.get("bot")]
+    lines = []
+    for p in bot:
+        q = quotes.get(p.get("ticker"))
+        if q:
+            lines.append(f"{p.get('name')}: {eur(q['price'])} € · seit Kauf "
+                         f"{pct((q['price'] * float(p.get('stueck', 0)) / cost_basis(p) - 1) * 100)}")
+    body = (("Bot-Käufe:\n" + "\n".join(lines)) if lines else "Keine offenen Bot-Käufe.")
+    body += f"\nFreies Budget: {eur(float(depot.get('budget') or 0))} €"
+    notify(f"🟢 Bot läuft · {now.strftime('%H:%M')}", body, priority=1, tags=["green_circle"], dry_run=dry_run)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--test", action="store_true", help="Test-Mitteilung + Übersicht senden")
@@ -1351,6 +1372,11 @@ def main() -> int:
         log(f"Wochenrückblick fehlgeschlagen: {e}")
     if now.weekday() < 5 and 8 <= now.hour < 23:
         bot_update(depot, quotes, state, now, args.dry_run)
+
+    try:
+        heartbeat(depot, quotes, state, now, args.dry_run)
+    except Exception as e:  # noqa: BLE001
+        log(f"Lebenszeichen fehlgeschlagen: {e}")
 
     if tickers and not quotes:
         fails = state.get("quote_fail_runs", 0) + 1
