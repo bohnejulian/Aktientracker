@@ -406,10 +406,18 @@ def check_prices(depot: dict, quotes: dict, state: dict, today: str, dry_run: bo
             key = f"{t}:{kind}:{mark}"
             hit = cond(q["price"], float(mark))
             if hit and not targets.get(key):
-                notify(f"🎯 {name} {'über' if kind == 'ueber' else 'unter'} {eur(float(mark))}",
-                       f"Aktuell {eur(q['price'])} {q['currency']} ({pct(chg)} heute)\n\n"
-                       + assessment(item, q, depot) + DISCLAIMER,
-                       priority=5 if kind == "unter" else 4, tags=["dart"],
+                is_goal = kind == "ueber" and item.get("ziel_prozent")
+                intro = (f"Gewinnziel +{item['ziel_prozent']} % erreicht! Laut Backtest war Verkaufen hier im Schnitt "
+                         "besser als Weiterhalten. Gewinn mitnehmen oder bewusst laufen lassen (dann Stop eng nachziehen).\n"
+                         if is_goal else "")
+                own = item.get("stueck")
+                notify(f"🎯 {name} {'über' if kind == 'ueber' else 'unter'} {eur(float(mark))}"
+                       + (" – Gewinnziel!" if is_goal else ""),
+                       intro + f"Aktuell {eur(q['price'])} {q['currency']} ({pct(chg)} heute)\n\n"
+                       + assessment(item, q, depot, allow_buy=not is_goal) + DISCLAIMER,
+                       priority=5 if kind == "unter" or is_goal else 4, tags=["dart"],
+                       actions=([("Alles verkauft", f"verkauf {t} alle"),
+                                 ("Hälfte verkauft", f"verkauf {t} {max(1, int(float(own) // 2))}")] if own else None),
                        click=link, dry_run=dry_run)
             targets[key] = hit
 
@@ -757,6 +765,39 @@ def check_auto_stops(depot: dict, quotes: dict, state: dict, dry_run: bool) -> N
             armed[t] = False
 
 
+# ---------------------------------------------------------------- Backtest-Statistik
+
+STATS_FILE = ROOT / "stats.json"
+
+
+def load_stats() -> dict:
+    try:
+        return json.loads(STATS_FILE.read_text()).get("gruppen", {})
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def idea_odds(idea: dict, stats: dict) -> dict | None:
+    vb = "ruhig" if idea["vol"] < 0.25 else "mittel" if idea["vol"] < 0.40 else "wild"
+    for label in (("stark", "alle") if idea["score"] >= 25 else ("alle",)):
+        g = stats.get(f"{idea['kind']}|{vb}|{label}")
+        if g:
+            return g
+    return None
+
+
+def odds_text(g: dict, price: float) -> str:
+    best = g["best"]
+    t = g["targets"][str(best)]
+    chances = " · ".join(f"+{x} %: {g['targets'][str(x)]['p_ziel'] * 100:.0f} %"
+                         for x in (5, 10, 15, 20) if str(x) in g["targets"])
+    return (f"📊 {g['n']} ähnliche Signale der letzten 2 Jahre (bis 40 Handelstage gehalten):\n"
+            f"   Chance, vor dem Stop zu erreichen: {chances}\n"
+            f"   👉 Verkaufsziel +{best} % (~{eur(price * (1 + best / 100))} €): erreicht in {t['p_ziel'] * 100:.0f} %, "
+            f"Stop in {t['p_stop'] * 100:.0f} %, sonst Verkauf nach 40 Tagen. "
+            f"Ø {pct(t['ev'] * 100)} pro Trade nach Gebühren")
+
+
 # ---------------------------------------------------------------- Kaufideen-Scan
 
 def maybe_scan(depot: dict, state: dict, now: datetime, dry_run: bool, force: bool = False) -> None:
@@ -806,7 +847,11 @@ def maybe_scan(depot: dict, state: dict, now: datetime, dry_run: bool, force: bo
         return  # keine Mitteilung – nur melden, wenn es wirklich etwas Gutes gibt
     for i in ideas:
         sent[i["t"]] = today
+    stats = load_stats()
+    for i in ideas:
+        i["odds"] = idea_odds(i, stats)
     state["last_ideas"] = {i["t"]: {"name": i["name"], "price": i["price"],
+                                    **({"ziel_prozent": i["odds"]["best"]} if i.get("odds") else {}),
                                     **({"heimat": i["t"]} if "." not in i["t"] else {})} for i in ideas}
     buttons = [(f"Gekauft: {i['n']}× {i['name']}", f"kauf {i['t']} {i['n']}") for i in ideas if i["n"] >= 1][:3]
     parts = []
@@ -817,7 +862,8 @@ def maybe_scan(depot: dict, state: dict, now: datetime, dry_run: bool, force: bo
         parts.append(f"{n}. {i['name']} ({i['idx']}) – {i['kind']}\n"
                      f"💶 {amount} · 🛑 Stop ~{eur(i['stop'])} € (−{i['stop_pct'] * 100:.0f} %)\n"
                      f"🧾 Gebühren hin+zurück ~{eur(f2)} € → lohnt ab {pct(f2 / max(1, i['n'] * i['price']) * 100)}\n"
-                     f"💡 {i['why']}")
+                     f"💡 {i['why']}"
+                     + (f"\n{odds_text(i['odds'], i['price'])}" if i.get("odds") else ""))
     notify(f"💡 Starke Kaufidee{'n' if len(ideas) > 1 else ''}: " + ", ".join(i["name"] for i in ideas), "\n\n".join(parts)
            + f"\n\nGeprüft: {len(universe)} Aktien aus DAX, MDAX, TecDAX, EuroStoxx50, Nasdaq 100, Dow. "
            "Bitte im Planspiel prüfen, ob die Aktie dort handelbar ist. Nach dem Kauf auf den Knopf tippen "

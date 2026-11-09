@@ -20,7 +20,7 @@ import scanner
 from tracker import analyse, log
 
 
-TARGETS = (3, 5, 8, 10, 15, 20, 30)
+TARGETS = (3, 5, 8, 10, 15, 20, 30)  # zusätzlich 0 = kein Ziel, nur nachgezogener Stop
 STATS_FILE = Path(__file__).parent / "stats.json"
 
 
@@ -32,7 +32,7 @@ def group_stats(rs: list[dict]) -> dict:
     """Wahrscheinlichkeiten je Gewinnziel + bestes Ziel (höchster Ø-Ertrag pro Trade nach Gebühren)."""
     n = len(rs)
     targets = {}
-    for x in TARGETS:
+    for x in TARGETS + (0,):
         outs = [r["out"][x] for r in rs]
         targets[x] = {
             "p_ziel": sum(o[0] == "ziel" for o in outs) / n,
@@ -40,7 +40,7 @@ def group_stats(rs: list[dict]) -> dict:
             "p_zeit": sum(o[0] == "zeit" for o in outs) / n,
             "ev": st.mean(o[1] for o in outs),
         }
-    best = max(TARGETS, key=lambda x: targets[x]["ev"])
+    best = max(TARGETS + (0,), key=lambda x: targets[x]["ev"])
     return {"n": n, "targets": {str(k): v for k, v in targets.items()}, "best": best,
             "ev_best": targets[best]["ev"], "p_stop_best": targets[best]["p_stop"]}
 
@@ -70,26 +70,22 @@ def main() -> None:
                 continue
             last_sig = i
             entry = closes[i]
-            stop = max(hist[-20:]) * (1 - min(max(sig["vol"] * 0.35, 0.05), 0.25))
-            res = {}
-            for h in (10, 20, 40):
-                path = closes[i + 1:i + h + 1]
-                hit = next((p for p in path if p <= stop), None)
-                exit_ = stop if hit is not None else path[-1]
-                res[h] = exit_ / entry - 1 - fee
-            # Für jedes Gewinnziel: was passiert zuerst – Ziel, Stop oder 40 Tage vorbei?
-            path = closes[i + 1:i + 41]
-            outcomes = {}
-            for x in TARGETS:
-                out, ret = "zeit", path[-1] / entry - 1 - fee
+            sp = min(max(sig["vol"] * 0.35, 0.05), 0.25)
+            # Nachgezogener Stop ab Kauf: startet bei Einstieg - sp, zieht mit dem höchsten Kurs seit Kauf nach
+            def run(path, target):
+                high = entry
                 for p in path:
+                    stop = high * (1 - sp)
                     if p <= stop:
-                        out, ret = "stop", stop / entry - 1 - fee
-                        break
-                    if p >= entry * (1 + x / 100):
-                        out, ret = "ziel", x / 100 - fee
-                        break
-                outcomes[x] = (out, ret)
+                        return "stop", p / entry - 1 - fee
+                    if target is not None and p >= entry * (1 + target / 100):
+                        return "ziel", target / 100 - fee
+                    high = max(high, p)
+                return "zeit", path[-1] / entry - 1 - fee
+            res = {h: run(closes[i + 1:i + h + 1], None)[1] for h in (10, 20, 40)}
+            path = closes[i + 1:i + 41]
+            outcomes = {x: run(path, x) for x in TARGETS}
+            outcomes[0] = run(path, None)  # 0 = kein festes Ziel, nur Stop
             rows.append({"t": t, "kind": sig["kind"], "score": sig["score"], "vb": vol_bucket(sig["vol"]),
                          "out": outcomes, **{f"r{h}": res[h] for h in res}})
 
@@ -130,7 +126,7 @@ def main() -> None:
     print("\n===== Bestes Gewinnziel je Gruppe =====")
     for key, g in stats["gruppen"].items():
         t = g["targets"][str(g["best"])]
-        print(f"{key:45s} n={g['n']:4d}  Ziel +{g['best']:2d} %: erreicht {t['p_ziel'] * 100:3.0f} %, "
+        print(f"{key:45s} n={g['n']:4d}  Ziel {('+' + str(g['best']) + ' %') if g['best'] else 'keins':6s}: erreicht {t['p_ziel'] * 100:3.0f} %, "
               f"Stop {t['p_stop'] * 100:3.0f} %, Ø {t['ev'] * 100:+.1f} %/Trade")
     STATS_FILE.write_text(json.dumps(stats, indent=1, ensure_ascii=False))
 

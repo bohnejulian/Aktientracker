@@ -208,14 +208,22 @@ def process(depot_file: Path, msgs: list[dict], state: dict, fetch_quotes, notif
                        "news": name, "bot": True}
                 if ticker in ideas and ideas[ticker].get("heimat"):
                     new["heimat"] = ideas[ticker]["heimat"]
+                if ticker in ideas and ideas[ticker].get("ziel_prozent"):
+                    zp = ideas[ticker]["ziel_prozent"]
+                    new["ziel_prozent"] = zp
+                    new["ueber"] = round(price * (1 + zp / 100), 2)  # Gewinnziel-Alarm
                 positions.append(new)
             f = _fee(doc, n * price)
             doc["budget"] = round(max(0.0, budget - n * price - f), 2)
             _cash(doc, -(n * price + f))
             changed = True
             _log_trade(state, m, f"Kauf {_int_or(n)} × {name} à {_eur(price)} €")
+            goal = ""
+            if not pos and ticker in ideas and ideas[ticker].get("ziel_prozent"):
+                goal = (f"\n🎯 Gewinnziel-Alarm gesetzt bei {_eur(price * (1 + ideas[ticker]['ziel_prozent'] / 100))} € "
+                        f"(+{ideas[ticker]['ziel_prozent']} %)")
             notify(f"✅ Gebucht: {_int_or(n)} × {name}", f"Kauf à {_eur(price)} € = {_eur(n * price)} € "
-                   f"+ ~{_eur(f)} € Gebühr\nFreies Budget jetzt: {_eur(doc['budget'])} €", priority=2,
+                   f"+ ~{_eur(f)} € Gebühr\nFreies Budget jetzt: {_eur(doc['budget'])} €{goal}", priority=2,
                    tags=["white_check_mark"], dry_run=dry_run)
         else:
             if not pos:
