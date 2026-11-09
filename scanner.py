@@ -80,6 +80,44 @@ def load_universe(log) -> dict[str, tuple[str, str]]:
     return uni
 
 
+def signal(closes: list[float], analyse) -> dict | None:
+    """Prüft eine Kursreihe auf ein Kaufsignal. Wird vom Scan und vom Backtest benutzt."""
+    if len(closes) < 210:
+        return None
+    a = analyse(closes)
+    p = closes[-1]
+    s200, s50 = a["sma200"], a["sma50"]
+    d200 = (p / s200 - 1) * 100
+    up = p > s200 and s50 > s200
+    prev200 = sum(closes[-206:-6]) / 200
+    crossed = closes[-6] < prev200 and p > s200 * 1.01 and s50 > sum(closes[-60:-10]) / 50
+    if up and a["rsi"] <= 35:
+        score = 40 - a["rsi"] + min(d200, 20)
+        kind = "Rücksetzer im Aufwärtstrend"
+        why = (f"Seit Monaten im Aufwärtstrend ({d200:.0f} % über dem 200-Tage-Schnitt), jetzt aber kurz "
+               f"stark gefallen (RSI {a['rsi']:.0f}). So eine Delle ist oft eine günstige Einstiegschance, "
+               "vorher kurz checken, ob schlimme News dahinterstecken.")
+    elif crossed:
+        score = 15 + min(d200, 10)
+        kind = "Trendwende nach oben"
+        why = ("Der Kurs ist in den letzten Tagen über seinen 200-Tage-Durchschnitt gestiegen, und der "
+               "50-Tage-Schnitt dreht nach oben. Das ist oft der Beginn eines neuen Aufwärtstrends.")
+    elif up and 50 <= a["rsi"] <= 65 and a["pos52"] >= 0.9 and (a["perf1m"] or 0) > 0.04:
+        score = 10 + (a["perf1m"] or 0) * 50
+        kind = "Stabiles Momentum"
+        why = (f"Nahe am Jahreshoch, im letzten Monat {a['perf1m'] * 100:+.0f} %, aber noch nicht überkauft "
+               f"(RSI {a['rsi']:.0f}). Starke Aktien bleiben oft eine Weile stark.")
+    else:
+        return None
+    vol = a["vol"]
+    score -= vol * 10  # ruhigere Aktien bevorzugen
+    perf6m = closes[-1] / closes[-126] - 1
+    score += max(-5.0, min(perf6m * 20, 10))  # langfristig starke Aktien haben mehr Potenzial
+    if perf6m >= 0.15:
+        why += f" Seit einem halben Jahr {perf6m * 100:+.0f} %, die Aktie hat also echten Rückenwind."
+    return {"kind": kind, "score": score, "why": why, "vol": vol}
+
+
 def scan(universe: dict, held: set[str], analyse, fx_rate, budget: float, max_share: float, log, top: int = 5):
     import yfinance as yf
 
@@ -96,42 +134,15 @@ def scan(universe: dict, held: set[str], analyse, fx_rate, budget: float, max_sh
             continue
         if len(closes) < 210:
             continue
-        a = analyse(closes)
-        p = closes[-1]
-        s200, s50 = a["sma200"], a["sma50"]
-        d200 = (p / s200 - 1) * 100
-        up = p > s200 and s50 > s200
-        prev200 = sum(closes[-206:-6]) / 200
-        crossed = closes[-6] < prev200 and p > s200 * 1.01 and s50 > sum(closes[-60:-10]) / 50
-
-        name, idx = universe[t]
-        if up and a["rsi"] <= 35:
-            score = 40 - a["rsi"] + min(d200, 20)
-            kind = "Rücksetzer im Aufwärtstrend"
-            why = (f"Seit Monaten im Aufwärtstrend ({d200:.0f} % über dem 200-Tage-Schnitt), jetzt aber kurz "
-                   f"stark gefallen (RSI {a['rsi']:.0f}). So eine Delle ist oft eine günstige Einstiegschance, "
-                   "vorher kurz checken, ob schlimme News dahinterstecken.")
-        elif crossed:
-            score = 15 + min(d200, 10)
-            kind = "Trendwende nach oben"
-            why = ("Der Kurs ist in den letzten Tagen über seinen 200-Tage-Durchschnitt gestiegen, und der "
-                   "50-Tage-Schnitt dreht nach oben. Das ist oft der Beginn eines neuen Aufwärtstrends.")
-        elif up and 50 <= a["rsi"] <= 65 and a["pos52"] >= 0.9 and (a["perf1m"] or 0) > 0.04:
-            score = 10 + (a["perf1m"] or 0) * 50
-            kind = "Stabiles Momentum"
-            why = (f"Nahe am Jahreshoch, im letzten Monat {a['perf1m'] * 100:+.0f} %, aber noch nicht überkauft "
-                   f"(RSI {a['rsi']:.0f}). Starke Aktien bleiben oft eine Weile stark.")
-        else:
+        sig = signal(closes, analyse)
+        if not sig:
             continue
-        vol = a["vol"]
+        name, idx = universe[t]
+        kind, score, why, vol = sig["kind"], sig["score"], sig["why"], sig["vol"]
+        p = closes[-1]
         # Wenige, dafür größere Trades: Einsatz je nach Schwankung
         share = 0.35 if vol < 0.25 else 0.25 if vol < 0.40 else 0.15 if vol < 0.60 else 0.08
         share = min(share, max_share)
-        score -= vol * 10  # ruhigere Aktien bevorzugen
-        perf6m = closes[-1] / closes[-126] - 1
-        score += max(-5.0, min(perf6m * 20, 10))  # langfristig starke Aktien haben mehr Potenzial
-        if perf6m >= 0.15:
-            why += f" Seit einem halben Jahr {perf6m * 100:+.0f} %, die Aktie hat also echten Rückenwind."
         p_eur = p
         if not (t.endswith(".DE") or t.endswith(".PA") or t.endswith(".AS") or t.endswith(".MI")
                 or t.endswith(".MC") or t.endswith(".BR") or t.endswith(".HE") or t.endswith(".IR")
