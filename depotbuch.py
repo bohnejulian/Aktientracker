@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -41,6 +42,8 @@ def fetch_inbox(server: str, topic: str, state: dict, log) -> list[dict]:
     msgs = []
     for t in (topic, inbox_topic(topic)):
         since = last.get(t) or "12h"
+        if since == "now":
+            since = "10m"
         try:
             r = requests.get(f"{server}/{t}/json", params={"poll": "1", "since": since}, timeout=20)
             r.raise_for_status()
@@ -58,8 +61,8 @@ def fetch_inbox(server: str, topic: str, state: dict, log) -> list[dict]:
         got.sort(key=lambda m: m.get("time", 0))
         if got:
             last[t] = got[-1]["id"]
-        elif t not in last:
-            last[t] = "now"
+        elif t not in last or last[t] == "now":
+            last[t] = str(int(time.time()))  # Unix-Zeit; "now" lehnt ntfy beim Abrufen ab
         msgs += [m for m in got if m.get("message") and not m.get("title")]
     msgs.sort(key=lambda m: m.get("time", 0))
     return msgs
