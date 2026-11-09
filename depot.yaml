@@ -7,6 +7,8 @@
 # ticker: Yahoo-Kürzel für den €-Kurs (z. B. NVD.DE = Nvidia an Xetra). Bei neuen Aktien
 #         weglassen, dann sucht der Tracker über die ISIN selbst (US-Kurse rechnet er in € um).
 # news:   Suchbegriff für Nachrichten.
+# sektor: Branche fürs Klumpenrisiko (Tech, Energie, Industrie, Finanzen, Gesundheit, Konsum, ...).
+#         Bei neuen Käufen trägt der Bot das selbst ein.
 # ueber / unter: optionale Kursmarken in €. Wird die Marke gerissen, gibt es einen Alarm.
 
 # Geld, das der Bot für Kaufvorschläge verplanen darf (€).
@@ -27,6 +29,7 @@ positionen:
     kaufdatum: 2026-11-09
     gebuehr_kauf: 27.9   # aus Planspiel zurückgerechnet
     news: Nasdaq 100
+    sektor: Tech
     art: etf
 
   - name: Deka-Technologie CF
@@ -38,6 +41,7 @@ positionen:
     kaufdatum: 2026-11-09
     gebuehr_kauf: 15.1   # aus Planspiel zurückgerechnet
     news: Technologieaktien
+    sektor: Tech
     art: fonds
 
   - name: First Solar
@@ -50,6 +54,7 @@ positionen:
     kaufdatum: 2026-11-09
     gebuehr_kauf: 15.0   # aus Planspiel zurückgerechnet
     news: First Solar
+    sektor: Energie
 
   - name: Lufthansa
     isin: DE0008232125
@@ -60,6 +65,7 @@ positionen:
     kaufdatum: 2026-11-09
     gebuehr_kauf: 15.0   # aus Planspiel zurückgerechnet
     news: Lufthansa
+    sektor: Industrie
 
   - name: Meta
     isin: US30303M1027
@@ -71,6 +77,7 @@ positionen:
     kaufdatum: 2026-11-09
     gebuehr_kauf: 16.5   # aus Planspiel zurückgerechnet
     news: Meta Platforms
+    sektor: Tech
 
   - name: Nvidia
     isin: US67066G1040
@@ -82,6 +89,7 @@ positionen:
     kaufdatum: 2026-11-09
     gebuehr_kauf: 45.2   # aus Planspiel zurückgerechnet
     news: Nvidia
+    sektor: Tech
 
   - name: Palantir
     isin: US69608A1088
@@ -93,6 +101,7 @@ positionen:
     kaufdatum: 2026-11-09
     gebuehr_kauf: 15.0   # aus Planspiel zurückgerechnet
     news: Palantir
+    sektor: Tech
 
   - name: Rheinmetall
     isin: DE0007030009
@@ -103,6 +112,7 @@ positionen:
     kaufdatum: 2026-11-09
     gebuehr_kauf: 9.0   # aus Planspiel zurückgerechnet
     news: Rheinmetall
+    sektor: Industrie
 
   - name: Take-Two Interactive
     isin: US8740541094
@@ -114,6 +124,7 @@ positionen:
     kaufdatum: 2026-11-09
     gebuehr_kauf: 15.0   # aus Planspiel zurückgerechnet
     news: Take-Two
+    sektor: Tech
 
 # Aktien, die ihr nicht besitzt, aber beobachten wollt (gleiches Format, ohne stueck/kaufkurs)
 watchlist: []
@@ -133,6 +144,7 @@ einstellungen:
   max_news_pro_lauf: 5      # damit das Handy nicht explodiert
   news_max_alter_stunden: 6 # ältere Artikel werden ignoriert
   uebersicht_uhrzeiten: ["09:15", "17:45"]   # Depot-Übersicht (deutsche Zeit)
+  max_sektor_prozent: 50    # Warnung, wenn eine Branche mehr als 50 % des Depots ausmacht
   max_anteil_pro_kauf: 35   # nie mehr als 35 % des Budgets in einen Kauf (wenige, gute Trades)
   auto_stop: true           # nachgezogener Stop-Loss-Alarm für Positionen ohne eigene 'unter'-Marke
   # KI-Bewertung der News: läuft nur, wenn im Repo das Secret ANTHROPIC_API_KEY gesetzt ist

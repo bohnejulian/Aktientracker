@@ -211,6 +211,8 @@ def process(depot_file: Path, msgs: list[dict], state: dict, fetch_quotes, notif
                 new = {"name": name, "ticker": ticker, "stueck": _int_or(n), "kaufkurs": round(price, 2),
                        "kaufdatum": datetime.now().strftime("%Y-%m-%d"), "gebuehr_kauf": round(f, 2),
                        "news": name, "bot": True}
+                if ticker in ideas and ideas[ticker].get("sektor"):
+                    new["sektor"] = ideas[ticker]["sektor"]
                 if ticker in ideas and ideas[ticker].get("heimat"):
                     new["heimat"] = ideas[ticker]["heimat"]
                 if ticker in ideas and ideas[ticker].get("ziel_prozent"):

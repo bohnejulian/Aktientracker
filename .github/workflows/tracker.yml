@@ -27,6 +27,7 @@ concurrency:
 
 permissions:
   contents: write   # damit per ntfy gemeldete Trades in depot.yaml gespeichert werden
+  actions: read     # für den Ausfall-Alarm (war der letzte Lauf schon kaputt?)
 
 jobs:
   run:
@@ -73,3 +74,21 @@ jobs:
         with:
           path: state.json
           key: state-${{ github.run_id }}
+
+      # Ausfall-Alarm: nur beim ERSTEN kaputten Lauf melden und einmal, wenn es wieder läuft
+      - name: Ausfall melden
+        if: always() && github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          STATUS: ${{ job.status }}
+        run: |
+          prev=$(gh run list -R "$GITHUB_REPOSITORY" -w tracker.yml -e schedule -s completed -L 1 --json conclusion -q '.[0].conclusion' || echo unknown)
+          url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          send() { jq -nc --arg t "$NTFY_TOPIC" --arg ti "$1" --arg m "$2" --argjson p "$3" --arg c "$url" \
+                     '{topic:$t,title:$ti,message:$m,priority:$p,click:$c}' | curl -s -d @- https://ntfy.sh > /dev/null; }
+          if [ "$STATUS" != "success" ] && [ "$prev" = "success" ]; then
+            send "🚨 Tracker ausgefallen" "Der Bot ist gerade abgestürzt, bis das behoben ist kommen keine Alarme. Sag Claude Bescheid (Details hinter dem Link)." 4
+          elif [ "$STATUS" = "success" ] && [ "$prev" = "failure" ]; then
+            send "✅ Tracker läuft wieder" "Der Bot arbeitet wieder normal." 2
+          fi

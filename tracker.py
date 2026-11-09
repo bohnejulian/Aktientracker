@@ -475,6 +475,68 @@ def all_items(depot: dict) -> list[dict]:
     return list(depot.get("positionen") or []) + list(depot.get("watchlist") or [])
 
 
+# ---------------------------------------------------------------- Klumpenrisiko (Branchen)
+
+SECTOR_DE = {"Technology": "Tech", "Communication Services": "Tech", "Financial Services": "Finanzen",
+             "Healthcare": "Gesundheit", "Industrials": "Industrie", "Consumer Cyclical": "Konsum",
+             "Consumer Defensive": "Konsum", "Energy": "Energie", "Utilities": "Energie",
+             "Basic Materials": "Rohstoffe", "Real Estate": "Immobilien"}
+
+
+def sector_lookup(ticker: str, state: dict) -> str | None:
+    """Branche über Yahoo, im Zustand zwischengespeichert (ändert sich ja nicht)."""
+    cache = state.setdefault("sectors", {})
+    if ticker in cache:
+        return cache[ticker]
+    try:
+        import yfinance as yf
+        sec = SECTOR_DE.get(yf.Ticker(ticker).info.get("sector") or "")
+    except Exception:  # noqa: BLE001
+        return None
+    cache[ticker] = sec
+    return sec
+
+
+def sector_of(item: dict, state: dict) -> str:
+    if item.get("sektor"):
+        return str(item["sektor"])
+    if item.get("art") in ("etf", "fonds"):
+        return "Gemischt"
+    t = item.get("heimat") or item.get("ticker")
+    return (sector_lookup(t, state) if t else None) or "Sonstige"
+
+
+def sector_weights(depot: dict, quotes: dict, state: dict) -> dict[str, float]:
+    """{Branche: Anteil am Aktien-/Fondswert des Depots}"""
+    vals: dict[str, float] = {}
+    for p in depot.get("positionen") or []:
+        q = quotes.get(p.get("ticker"))
+        if q:
+            sec = sector_of(p, state)
+            vals[sec] = vals.get(sec, 0.0) + q["price"] * float(p.get("stueck", 0))
+    total = sum(vals.values())
+    return {k: v / total for k, v in sorted(vals.items(), key=lambda x: -x[1])} if total else {}
+
+
+def check_sector_risk(depot: dict, quotes: dict, state: dict, dry_run: bool) -> None:
+    """Warnt einmal, wenn eine Branche zu groß wird, und erneut erst bei weiteren +10 Prozentpunkten."""
+    limit = float(CFG.get("max_sektor_prozent", 50)) / 100
+    w = sector_weights(depot, quotes, state)
+    warned = state.setdefault("sector_warned", {})
+    for sec, share in w.items():
+        if share <= limit - 0.05:
+            warned.pop(sec, None)  # wieder klar unter der Grenze: zurücksetzen
+        if share > limit and share >= warned.get(sec, 0) + 0.10 and sec != "Gemischt":
+            warned[sec] = share
+            others = ", ".join(f"{k} {v * 100:.0f} %" for k, v in w.items() if k != sec) or "–"
+            notify(f"⚠️ Klumpenrisiko: {sec[:1].upper() + sec[1:]} {share * 100:.0f} %",
+                   f"{share * 100:.0f} % eures Depots stecken in {sec}. Fällt die Branche an einem Tag, "
+                   f"trifft es fast alles gleichzeitig.\nRest: {others}\n\n"
+                   f"💡 Neue Kaufideen aus {sec} bekommen ab jetzt einen Abzug, andere Branchen werden bevorzugt. "
+                   "Bei Gewinnmitnahmen eher hier verkaufen.",
+                   priority=3, tags=["warning"], dry_run=dry_run)
+
+
 # ---------------------------------------------------------------- Übersicht
 
 def summary_text(depot: dict, quotes: dict) -> str:
@@ -502,6 +564,9 @@ def summary_text(depot: dict, quotes: dict) -> str:
         big = [f"{n} {v / total_value * 100:.0f} %" for v, n in sorted(weights, reverse=True) if v / total_value > 0.2]
         if big:
             lines.append("⚠️ Klumpenrisiko: " + ", ".join(big) + " vom Depot")
+        sw = sector_weights(depot, quotes, STATE)
+        if sw:
+            lines.append("Branchen: " + " · ".join(f"{k} {v * 100:.0f} %" for k, v in sw.items()))
     budget = float(depot.get("budget") or 0)
     if budget:
         lines.append(f"Freies Bot-Budget: {eur(budget)} €")
@@ -773,6 +838,8 @@ def check_earnings(depot: dict, state: dict, now: datetime, dry_run: bool) -> li
 # ---------------------------------------------------------------- Auto-Stop-Loss
 
 CFG: dict = {}
+STATE: dict = {}        # Zustand dieses Laufs (für Branchen-Cache)
+LAST_QUOTES: dict = {}  # Kurse dieses Laufs
 
 
 def stop_level(q: dict, item: dict | None = None) -> float:
@@ -897,8 +964,22 @@ def maybe_scan(depot: dict, state: dict, now: datetime, dry_run: bool, force: bo
             return
         min_score += 5
         ideas = [i for i in ideas if i["vol"] < 0.35]
-    ideas = [i for i in ideas if i["n"] * i["price"] >= min_trade(cfg)]
-    ideas = [i for i in ideas if i["score"] >= min_score and i["t"] not in sent][:int(cfg.get("scan_anzahl", 2))]
+    ideas = [i for i in ideas if i["n"] * i["price"] >= min_trade(cfg) and i["t"] not in sent]
+    # Klumpenrisiko: Ideen aus schon übergewichteten Branchen abwerten, andere bevorzugen
+    weights = sector_weights(depot, LAST_QUOTES, state)
+    limit = float(cfg.get("max_sektor_prozent", 50)) / 100
+    for i in ideas:
+        if i["score"] < min_score - 15:
+            continue
+        i["sektor"] = sector_lookup(i["t"], state) or "Sonstige"
+        share = weights.get(i["sektor"], 0)
+        if share > limit:
+            i["score"] -= 15
+            i["klumpen"] = share
+        elif share < 0.15:
+            i["score"] += 3  # neue Branche = breiter aufgestellt
+    ideas.sort(key=lambda x: -x["score"])
+    ideas = [i for i in ideas if i["score"] >= min_score][:int(cfg.get("scan_anzahl", 2))]
     log(f"Scan: {len(ideas)} starke neue Ideen (Schwelle {min_score})")
     if not ideas:
         return  # keine Mitteilung – nur melden, wenn es wirklich etwas Gutes gibt
@@ -909,10 +990,11 @@ def maybe_scan(depot: dict, state: dict, now: datetime, dry_run: bool, force: bo
         i["odds"] = idea_odds(i, stats)
     state["last_ideas"] = {i["t"]: {"name": i["name"], "price": i["price"],
                                     **({"ziel_prozent": i["odds"]["best"]} if i.get("odds") and i["odds"]["best"] else {}),
+                                    **({"sektor": i["sektor"]} if i.get("sektor") else {}),
                                     **({"heimat": i["t"]} if "." not in i["t"] else {})} for i in ideas}
     for i in ideas:
         f2 = fee(i["n"] * i["price"], cfg) * 2
-        body = [f"{i['kind']} · {i['idx']}",
+        body = [f"{i['kind']} · {i['idx']}" + (f" · {i['sektor']}" if i.get("sektor") else ""),
                 f"Kauf:   bis ~{eur(i['n'] * i['price'])} € ({i['n']} Stk. à {eur(i['price'])} €)" if i["n"] >= 1
                 else f"Kurs:   {eur(i['price'])} € (Budget zu klein)",
                 f"Stop:   {eur(i['stop'])} € (−{i['stop_pct'] * 100:.0f} %)",
@@ -930,6 +1012,8 @@ def maybe_scan(depot: dict, state: dict, now: datetime, dry_run: bool, force: bo
                         else "👉 Verkaufen: kein festes Ziel, Stop nachziehen lassen")
         body.append("")
         body.append(f"💡 {i['why'].split('. ')[0].rstrip('.')}.")
+        if i.get("klumpen"):
+            body.append(f"⚠️ Ihr habt schon {i['klumpen'] * 100:.0f} % {i['sektor']}, das erhöht das Klumpenrisiko.")
         body.append(IDEA_NOTE.strip())
         btn = [(f"Gekauft: {i['n']}× {i['name']}", f"kauf {i['t']} {i['n']}")] if i["n"] >= 1 else None
         notify(f"💡 Kaufidee: {i['name']}", "\n".join(body), priority=4, tags=["bulb"], actions=btn,
@@ -1071,6 +1155,9 @@ def main() -> int:
     args = ap.parse_args()
 
     state = load_state()
+    state.setdefault("sectors", {})
+    STATE.clear()
+    STATE.update(state)
     now = datetime.now(BERLIN)
 
     # Trades aus dem ntfy-Eingangskanal einbuchen
@@ -1089,6 +1176,7 @@ def main() -> int:
 
     log(f"Hole Kurse für {len(tickers)} Werte …")
     quotes = fetch_quotes(tickers)
+    LAST_QUOTES.update(quotes)
     try:
         live_overlay(depot, quotes)
     except Exception as e:  # noqa: BLE001
@@ -1132,6 +1220,10 @@ def main() -> int:
 
     check_prices(depot, quotes, state, now.strftime("%Y-%m-%d"), args.dry_run)
     check_auto_stops(depot, quotes, state, args.dry_run)
+    try:
+        check_sector_risk(depot, quotes, state, args.dry_run)
+    except Exception as e:  # noqa: BLE001
+        log(f"Klumpenrisiko-Check fehlgeschlagen: {e}")
     try:
         depot["_termine"] = check_earnings(depot, state, now, args.dry_run)
     except Exception as e:  # noqa: BLE001
