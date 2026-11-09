@@ -158,6 +158,42 @@ def fx_rate(cur: str) -> float | None:
     return _FX[cur]
 
 
+def live_overlay(depot: dict, quotes: dict) -> None:
+    """Ersetzt Kurs und Vortageskurs durch den Börsenplatz des Planspiels (Stuttgart), falls verfügbar."""
+    import yfinance as yf
+
+    today = datetime.now(BERLIN).date()
+    for item in all_items(depot):
+        t = item.get("ticker")
+        q = quotes.get(t)
+        if not q:
+            continue
+        cands = item.get("kurs") or ([t[:-3] + ".SG"] if t.endswith(".DE") else [])
+        for c in cands:
+            if c == t:
+                break  # Hauptkürzel ist schon drin
+            try:
+                h = yf.Ticker(c).history(period="5d", interval="1d")["Close"].dropna()
+            except Exception:  # noqa: BLE001
+                continue
+            if not len(h) or (today - h.index[-1].date()).days > 4:
+                continue
+            q["price"] = float(h.iloc[-1])
+            if len(h) >= 2:
+                q["prev_close"] = float(h.iloc[-2])
+            q["closes"][-1] = q["price"]
+            q["quelle"] = c
+            break
+
+
+def cost_basis(item: dict) -> float:
+    """Kaufwert inkl. Kaufgebühr – so rechnet das Planspiel „seit Kauf“."""
+    n = float(item.get("stueck", 0))
+    k = float(item.get("kaufkurs", 0))
+    f = item.get("gebuehr_kauf")
+    return n * k + (float(f) if f is not None else fee(n * k, CFG))
+
+
 def fetch_quotes(tickers: list[str]) -> dict[str, dict]:
     """{ticker: {price, prev_close, currency, closes}} aus einem Jahr Tageskursen."""
     import yfinance as yf
@@ -256,7 +292,7 @@ def headline(item: dict, q: dict) -> str:
     if item.get("stueck") and item.get("kaufkurs"):
         n = float(item["stueck"])
         diff = (q["price"] - q["prev_close"]) * n
-        out += f" ({'+' if diff >= 0 else ''}{eur(diff)} €) · seit Kauf {pct((q['price'] / float(item['kaufkurs']) - 1) * 100)}"
+        out += f" ({'+' if diff >= 0 else ''}{eur(diff)} €) · seit Kauf {pct((q['price'] * n / cost_basis(item) - 1) * 100)}"
     return out
 
 
@@ -451,7 +487,7 @@ def summary_text(depot: dict, quotes: dict) -> str:
             continue
         n = float(p.get("stueck", 0))
         value = q["price"] * n
-        cost = float(p.get("kaufkurs", q["price"])) * n
+        cost = cost_basis(p) if p.get("kaufkurs") else q["price"] * n
         total_value += value
         total_cost += cost
         day_diff += (q["price"] - q["prev_close"]) * n
@@ -919,7 +955,7 @@ def bot_update(depot: dict, quotes: dict, state: dict, now: datetime, dry_run: b
             blocks.append(f"{name}: kein Kurs")
             continue
         n, k = float(p.get("stueck", 0)), float(p.get("kaufkurs", q["price"]))
-        v, c, d = n * q["price"], n * k, n * (q["price"] - q["prev_close"])
+        v, c, d = n * q["price"], cost_basis(p), n * (q["price"] - q["prev_close"])
         total_v, total_c, total_d = total_v + v, total_c + c, total_d + d
         a = analyse(q["closes"])
         stop = float(p["unter"]) if p.get("unter") is not None else stop_level(q, p)
@@ -951,7 +987,7 @@ def bot_update(depot: dict, quotes: dict, state: dict, now: datetime, dry_run: b
         if not changed:
             continue
         line = (f"{name}: {eur(q['price'])} € ({pct((q['price'] / q['prev_close'] - 1) * 100)} heute, "
-                f"{pct((q['price'] / k - 1) * 100)} seit Kauf = {'+' if v - c >= 0 else ''}{eur(v - c)} €)\n"
+                f"{pct((v / c - 1) * 100)} seit Kauf = {'+' if v - c >= 0 else ''}{eur(v - c)} €)\n"
                 f"   {rec} · Stop {eur(stop)}")
         for x in sorted(news, key=lambda x: (-x.get("relevanz", 0), -x["t"]))[:2]:
             tag = f"🤖{x['relevanz']}/5 {x['richtung']}: " if x.get("relevanz") else ""
@@ -1053,6 +1089,10 @@ def main() -> int:
 
     log(f"Hole Kurse für {len(tickers)} Werte …")
     quotes = fetch_quotes(tickers)
+    try:
+        live_overlay(depot, quotes)
+    except Exception as e:  # noqa: BLE001
+        log(f"Stuttgart-Kurse nicht abrufbar: {e}")
     log(f"{len(quotes)}/{len(tickers)} Kurse erhalten")
 
     if args.scan:

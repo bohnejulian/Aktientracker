@@ -198,15 +198,18 @@ def process(depot_file: Path, msgs: list[dict], state: dict, fetch_quotes, notif
             n = cmd["stueck"]
             if not n:
                 continue
+            f = _fee(doc, n * price)
             if pos:
                 pos["bot"] = True
+                if pos.get("gebuehr_kauf") is not None:
+                    pos["gebuehr_kauf"] = round(float(pos["gebuehr_kauf"]) + f, 2)
                 old_n = float(pos.get("stueck", 0))
                 old_k = float(pos.get("kaufkurs", price))
                 pos["stueck"] = _int_or(old_n + n)
                 pos["kaufkurs"] = round((old_n * old_k + n * price) / (old_n + n), 2)
             else:
                 new = {"name": name, "ticker": ticker, "stueck": _int_or(n), "kaufkurs": round(price, 2),
-                       "kaufdatum": datetime.now().strftime("%Y-%m-%d"),
+                       "kaufdatum": datetime.now().strftime("%Y-%m-%d"), "gebuehr_kauf": round(f, 2),
                        "news": name, "bot": True}
                 if ticker in ideas and ideas[ticker].get("heimat"):
                     new["heimat"] = ideas[ticker]["heimat"]
@@ -215,7 +218,6 @@ def process(depot_file: Path, msgs: list[dict], state: dict, fetch_quotes, notif
                     new["ziel_prozent"] = zp
                     new["ueber"] = round(price * (1 + zp / 100), 2)  # Gewinnziel-Alarm
                 positions.append(new)
-            f = _fee(doc, n * price)
             doc["budget"] = round(max(0.0, budget - n * price - f), 2)
             _cash(doc, -(n * price + f))
             changed = True

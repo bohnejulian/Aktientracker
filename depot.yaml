@@ -3,6 +3,7 @@
 #  Stand: 09.11.2026 17:26 (aus dem Planspiel übernommen)
 # ============================================================
 # isin:   steht im Planspiel unter dem Namen. 
+# kurs:   Börsenplätze für den aktuellen Kurs (zuerst Stuttgart wie im Planspiel), ticker für den Chartverlauf
 # ticker: Yahoo-Kürzel für den €-Kurs (z. B. NVD.DE = Nvidia an Xetra). Bei neuen Aktien
 #         weglassen, dann sucht der Tracker über die ISIN selbst (US-Kurse rechnet er in € um).
 # news:   Suchbegriff für Nachrichten.
@@ -20,80 +21,98 @@ positionen:
   - name: Deka Nasdaq-100 ETF
     isin: DE000ETFL623
     ticker: D6RH.DE
+    kurs: [D6RH.DE]   # aktueller Kurs wie im Planspiel (Stuttgart)
     stueck: 55
     kaufkurs: 170.88
     kaufdatum: 2026-11-09
+    gebuehr_kauf: 27.9   # aus Planspiel zurückgerechnet
     news: Nasdaq 100
     art: etf
 
   - name: Deka-Technologie CF
     isin: DE0005152623
     ticker: 0P00000EK2.F
+    kurs: [D6RG.F, D6RG.DU]   # aktueller Kurs wie im Planspiel (Stuttgart)
     stueck: 30
     kaufkurs: 123.67
     kaufdatum: 2026-11-09
+    gebuehr_kauf: 15.1   # aus Planspiel zurückgerechnet
     news: Technologieaktien
     art: fonds
 
   - name: First Solar
     isin: US3364331070
     ticker: F3A.DE
+    kurs: [F3A.SG, F3A.F]   # aktueller Kurs wie im Planspiel (Stuttgart)
     heimat: FSLR        # für Quartalszahlen-Termine
     stueck: 5
     kaufkurs: 178.00
     kaufdatum: 2026-11-09
+    gebuehr_kauf: 15.0   # aus Planspiel zurückgerechnet
     news: First Solar
 
   - name: Lufthansa
     isin: DE0008232125
     ticker: LHA.DE
+    kurs: [LHA.SG, LHA.F]   # aktueller Kurs wie im Planspiel (Stuttgart)
     stueck: 10
     kaufkurs: 8.54
     kaufdatum: 2026-11-09
+    gebuehr_kauf: 15.0   # aus Planspiel zurückgerechnet
     news: Lufthansa
 
   - name: Meta
     isin: US30303M1027
     ticker: FB2A.DE
+    kurs: [FB2A.SG, FB2A.F]   # aktueller Kurs wie im Planspiel (Stuttgart)
     heimat: META        # für Quartalszahlen-Termine
     stueck: 10
     kaufkurs: 550.10
     kaufdatum: 2026-11-09
+    gebuehr_kauf: 16.5   # aus Planspiel zurückgerechnet
     news: Meta Platforms
 
   - name: Nvidia
     isin: US67066G1040
     ticker: NVD.DE
+    kurs: [NVD.SG, NVD.F]   # aktueller Kurs wie im Planspiel (Stuttgart)
     heimat: NVDA        # für Quartalszahlen-Termine
     stueck: 45
     kaufkurs: 158.60
     kaufdatum: 2026-11-09
+    gebuehr_kauf: 45.2   # aus Planspiel zurückgerechnet
     news: Nvidia
 
   - name: Palantir
     isin: US69608A1088
     ticker: PTX.DE
+    kurs: [PTX.F, PTX.DE]   # aktueller Kurs wie im Planspiel (Stuttgart)
     heimat: PLTR        # für Quartalszahlen-Termine
     stueck: 10
     kaufkurs: 151.76
     kaufdatum: 2026-11-09
+    gebuehr_kauf: 15.0   # aus Planspiel zurückgerechnet
     news: Palantir
 
   - name: Rheinmetall
     isin: DE0007030009
     ticker: RHM.DE
+    kurs: [RHM.SG, RHM.F]   # aktueller Kurs wie im Planspiel (Stuttgart)
     stueck: 7
     kaufkurs: 822.70
     kaufdatum: 2026-11-09
+    gebuehr_kauf: 9.0   # aus Planspiel zurückgerechnet
     news: Rheinmetall
 
   - name: Take-Two Interactive
     isin: US8740541094
     ticker: TKE.DE
+    kurs: [TKE.SG, TKE.F]   # aktueller Kurs wie im Planspiel (Stuttgart)
     heimat: TTWO        # für Quartalszahlen-Termine
     stueck: 5
     kaufkurs: 194.90
     kaufdatum: 2026-11-09
+    gebuehr_kauf: 15.0   # aus Planspiel zurückgerechnet
     news: Take-Two
 
 # Aktien, die ihr nicht besitzt, aber beobachten wollt (gleiches Format, ohne stueck/kaufkurs)
