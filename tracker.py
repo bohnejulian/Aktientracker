@@ -1,6 +1,6 @@
 """Aktien- und News-Tracker fürs Planspiel Börse.
 
-Läuft alle 15 Minuten (GitHub Actions), prüft Kurse und News zu den
+Läuft alle 5 Minuten (GitHub Actions, angestoßen von cron-job.org), prüft Kurse und News zu den
 Aktien in depot.yaml und schickt Alarme über ntfy aufs Handy.
 
 Lokal testen:  NTFY_TOPIC=mein-geheimer-kanal python tracker.py --test
@@ -1220,6 +1220,11 @@ def main() -> int:
     ap.add_argument("--review", action="store_true", help="Wochenrückblick sofort schicken")
     args = ap.parse_args()
 
+    now0 = datetime.now(BERLIN)
+    if not (args.test or args.scan or args.review or args.beispiel or args.dry_run) and not (7 <= now0.hour < 23):
+        log("Nachtruhe (23–7 Uhr), nichts zu tun.")
+        return 0
+
     state = load_state()
     state.setdefault("sectors", {})
     STATE.clear()
@@ -1349,7 +1354,7 @@ def main() -> int:
     if tickers and not quotes:
         fails = state.get("quote_fail_runs", 0) + 1
         state["quote_fail_runs"] = fails
-        if fails == 8:  # ca. 2 Stunden am Stück keine Kurse
+        if fails == 24:  # ca. 2 Stunden am Stück keine Kurse (Lauf alle 5 Min.)
             notify("⚠️ Tracker: keine Kurse", "Seit ca. 2 Stunden kommen keine Kurse von Yahoo. "
                    "Bitte Ticker in depot.yaml prüfen oder Bescheid geben.", priority=4,
                    tags=["warning"], dry_run=args.dry_run)

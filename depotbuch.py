@@ -24,7 +24,7 @@ HELP = ("So meldet ihr Trades (einfach als Nachricht in den Kanal schreiben):\n"
         "kauf SAP 9  ·  kauf SAP 9 274,50\n"
         "verkauf Nvidia 20  ·  verkauf Nvidia alle 160\n"
         "budget 8000  ·  status\n"
-        "Ohne Kurs nimmt der Bot den aktuellen. Verarbeitet wird beim nächsten Lauf (max. ~15 Min.).")
+        "Ohne Kurs nimmt der Bot den aktuellen. Verarbeitet wird beim nächsten Lauf (max. ~5 Min.).")
 
 BUY = ("kauf", "kaufe", "gekauft", "buy", "k")
 SELL = ("verkauf", "verkaufe", "verkauft", "sell", "v")

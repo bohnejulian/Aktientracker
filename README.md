@@ -1,6 +1,6 @@
 # Aktien- und News-Tracker fürs Planspiel Börse
 
-Prüft werktags von 7 bis 23 Uhr alle 15 Minuten eure Aktien und schickt Alarme per ntfy aufs Handy:
+Prüft werktags von 7 bis 23 Uhr alle 5 Minuten eure Aktien und schickt Alarme per ntfy aufs Handy:
 
 - 📈📉 **Starke Kursbewegung**: ab ±3 % zum Vortag, dann erneut bei ±5 %, ±7 % … (einmal pro Stufe und Tag)
 - 🎯 **Kursmarken**: wenn ein selbst gesetzter Kurs (`ueber` / `unter`) gerissen wird
@@ -16,24 +16,25 @@ Horizont (langfristig halten / kurzfristig-spekulativ), Signal (z. B. überkauft
 Betragsvorschlag aus dem Bot-Budget (`budget` in depot.yaml, je wilder die Aktie, desto kleiner) und eine Stop-Loss-Idee.
 Das ist keine Anlageberatung, sondern eine Entscheidungshilfe fürs Planspiel.
 
-Kosten: 0 € (läuft auf GitHub Actions, ca. 1.500 der 2.000 Freiminuten pro Monat).
+Kosten: 0 € (öffentliches Repo = unbegrenzte GitHub-Actions-Minuten). Angestoßen wird der Bot alle 5 Min. von cron-job.org,
+der GitHub-Zeitplan läuft nur als Reserve mit.
 
 ## Einrichtung (einmalig, ca. 5 Minuten)
 
 1. **ntfy-App** installieren (iOS/Android), auf **+** tippen und diesen Kanal abonnieren:
-   `planspiel-b730f1fbab24`
+   euren Kanalnamen (steht NUR im Secret `NTFY_TOPIC`, niemals hier eintragen – das Repo ist öffentlich!).
    Alle im Team abonnieren denselben Kanal. Den Namen nicht öffentlich teilen, sonst kann jeder mitlesen.
 2. Im GitHub-Repo: **Settings → Secrets and variables → Actions → New repository secret**
-   Name: `NTFY_TOPIC`, Wert: `planspiel-b730f1fbab24`
+   Name: `NTFY_TOPIC`, Wert: euer geheimer Kanalname
 3. **Actions**-Tab → „Aktien-Tracker“ → **Run workflow** (Haken bei „Testnachricht“ lassen).
    Nach ca. 1 Minute sollte „✅ Tracker läuft!“ auf dem Handy erscheinen.
 
 ## Alles in einem ntfy-Kanal
 
-Im Kanal `planspiel-b730f1fbab24` kommen alle Alarme, Kaufideen und Übersichten an, dazu alle 15 Min. (leise) der Stand der Bot-Käufe.
+Im Kanal kommen alle Alarme, Kaufideen und Übersichten an, dazu alle 15 Min. (leise) der Stand der Bot-Käufe.
 Ihr schreibt eure Trades einfach als Nachricht in denselben Kanal: `kauf SAP 5`, `kauf SAP 5 274,50`, `verkauf Nvidia alle`,
 `budget 8000`, `status`, `hilfe`. Die „Gekauft“-Knöpfe unter den Kaufideen machen das automatisch.
-Der Bot bucht beim nächsten Lauf (max. ~15 Min.) in depot.yaml ein und bestätigt.
+Der Bot bucht beim nächsten Lauf (max. ~5 Min.) in depot.yaml ein und bestätigt.
 
 ## Depot pflegen
 
