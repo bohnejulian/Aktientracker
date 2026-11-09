@@ -164,7 +164,9 @@ def fetch_quotes(tickers: list[str]) -> dict[str, dict]:
         try:
             tk = yf.Ticker(t)
             hist = tk.history(period="1y", interval="1d", auto_adjust=False)
-            closes = [float(c) for c in hist["Close"].dropna().tolist()]
+            cl = hist["Close"].dropna()
+            closes = [float(c) for c in cl.tolist()]
+            dates = [d.strftime("%Y-%m-%d") if hasattr(d, "strftime") else "" for d in cl.index]
             if len(closes) < 2:
                 raise ValueError("zu wenige Kursdaten")
             try:
@@ -177,7 +179,8 @@ def fetch_quotes(tickers: list[str]) -> dict[str, dict]:
                     closes = [c / rate for c in closes]
                     currency = "EUR"
             quotes[t] = {"price": closes[-1], "prev_close": closes[-2],
-                         "currency": "€" if currency.upper() == "EUR" else currency, "closes": closes}
+                         "currency": "€" if currency.upper() == "EUR" else currency, "closes": closes,
+                         "dates": dates}
         except Exception as e:  # noqa: BLE001 – Yahoo wirft alles Mögliche
             log(f"Kurs für {t} nicht abrufbar: {e}")
     return quotes
@@ -310,7 +313,7 @@ def assessment(item: dict, q: dict, depot: dict, allow_buy: bool = True) -> str:
     else:
         risk, share = "sehr hoch", 0.08
     share = min(share, float(cfg.get("max_anteil_pro_kauf", 35)) / 100)
-    stop = stop_level(q)
+    stop = stop_level(q, item if item.get("stueck") else None)
     stop_pct = max(0.0, 1 - stop / p)
 
     left = endspurt(cfg)
@@ -445,7 +448,7 @@ def summary_text(depot: dict, quotes: dict) -> str:
         perf = (value / cost - 1) * 100 if cost else 0
         lines.append(f"{name}: {eur(q['price'])} ({pct((q['price'] / q['prev_close'] - 1) * 100)} heute, "
                      f"{pct(perf)} seit Kauf) [{short_horizon(p, q)}]"
-                     + (f" Stop {eur(float(p['unter']) if p.get('unter') is not None else stop_level(q))}"
+                     + (f" Stop {eur(float(p['unter']) if p.get('unter') is not None else stop_level(q, p))}"
                         if (depot.get("einstellungen") or {}).get("auto_stop", True) or p.get("unter") is not None else ""))
         weights.append((value, name))
     if total_cost:
@@ -729,14 +732,19 @@ def check_earnings(depot: dict, state: dict, now: datetime, dry_run: bool) -> li
 CFG: dict = {}
 
 
-def stop_level(q: dict) -> float:
-    """Nachgezogener Stop: höchster Schlusskurs der letzten 20 Tage minus schwankungsabhängiger Abstand.
-    Im Endspurt halb so viel Abstand, um Gewinne zu sichern."""
+def stop_level(q: dict, item: dict | None = None) -> float:
+    """Nachgezogener Stop: höchster Kurs seit dem Kauf (mindestens Kaufkurs) minus schwankungsabhängiger
+    Abstand. Ohne Kaufdaten (z. B. bei Ideen) vom aktuellen Kurs aus. Im Endspurt halb so viel Abstand."""
     a = analyse(q["closes"])
     stop_pct = min(max(a["vol"] * 0.35, 0.05), 0.25)
     if endspurt(CFG) is not None:
         stop_pct = max(0.03, stop_pct * 0.5)
-    return max(q["closes"][-20:] + [q["price"]]) * (1 - stop_pct)
+    high = q["price"]
+    if item and item.get("kaufkurs"):
+        since = str(item.get("kaufdatum") or "")
+        after = [c for c, d in zip(q["closes"], q.get("dates") or []) if since and d >= since]
+        high = max([float(item["kaufkurs"])] + after + [q["price"]])
+    return high * (1 - stop_pct)
 
 
 def check_auto_stops(depot: dict, quotes: dict, state: dict, dry_run: bool) -> None:
@@ -748,7 +756,7 @@ def check_auto_stops(depot: dict, quotes: dict, state: dict, dry_run: bool) -> N
         q = quotes.get(t)
         if not q or item.get("unter") is not None:
             continue  # eigene Marke hat Vorrang
-        stop = stop_level(q)
+        stop = stop_level(q, item)
         if q["price"] <= stop and not armed.get(t):
             loss = (q["price"] / float(item["kaufkurs"]) - 1) * 100 if item.get("kaufkurs") else None
             notify(f"🛑 {item.get('name', t)} unter Stop-Loss {eur(stop)}",
@@ -789,6 +797,13 @@ def idea_odds(idea: dict, stats: dict) -> dict | None:
 def odds_text(g: dict, price: float) -> str:
     best = g["best"]
     t = g["targets"][str(best)]
+    if not best:
+        chances = " · ".join(f"+{x} %: {g['targets'][str(x)]['p_ziel'] * 100:.0f} %"
+                             for x in (5, 10, 15, 20) if str(x) in g["targets"])
+        return (f"📊 {g['n']} ähnliche Signale der letzten 2 Jahre (bis 40 Handelstage gehalten):\n"
+                f"   Chance, vor dem Stop zu erreichen: {chances}\n"
+                f"   👉 Kein festes Verkaufsziel: Am besten lief es, Gewinne laufen zu lassen und nur den Stop "
+                f"nachzuziehen (Stop in {t['p_stop'] * 100:.0f} % der Fälle). Ø {pct(t['ev'] * 100)} pro Trade nach Gebühren")
     chances = " · ".join(f"+{x} %: {g['targets'][str(x)]['p_ziel'] * 100:.0f} %"
                          for x in (5, 10, 15, 20) if str(x) in g["targets"])
     return (f"📊 {g['n']} ähnliche Signale der letzten 2 Jahre (bis 40 Handelstage gehalten):\n"
@@ -851,7 +866,7 @@ def maybe_scan(depot: dict, state: dict, now: datetime, dry_run: bool, force: bo
     for i in ideas:
         i["odds"] = idea_odds(i, stats)
     state["last_ideas"] = {i["t"]: {"name": i["name"], "price": i["price"],
-                                    **({"ziel_prozent": i["odds"]["best"]} if i.get("odds") else {}),
+                                    **({"ziel_prozent": i["odds"]["best"]} if i.get("odds") and i["odds"]["best"] else {}),
                                     **({"heimat": i["t"]} if "." not in i["t"] else {})} for i in ideas}
     buttons = [(f"Gekauft: {i['n']}× {i['name']}", f"kauf {i['t']} {i['n']}") for i in ideas if i["n"] >= 1][:3]
     parts = []
@@ -891,7 +906,7 @@ def bot_update(depot: dict, quotes: dict, state: dict, now: datetime, dry_run: b
         v, c, d = n * q["price"], n * k, n * (q["price"] - q["prev_close"])
         total_v, total_c, total_d = total_v + v, total_c + c, total_d + d
         a = analyse(q["closes"])
-        stop = float(p["unter"]) if p.get("unter") is not None else stop_level(q)
+        stop = float(p["unter"]) if p.get("unter") is not None else stop_level(q, p)
         up = a["sma200"] is not None and q["price"] > a["sma200"]
         if q["price"] <= stop:
             rec = "🛑 Unter Stop – Verkauf prüfen"

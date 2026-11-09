@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import datetime
 from pathlib import Path
 
 import requests
@@ -205,6 +206,7 @@ def process(depot_file: Path, msgs: list[dict], state: dict, fetch_quotes, notif
                 pos["kaufkurs"] = round((old_n * old_k + n * price) / (old_n + n), 2)
             else:
                 new = {"name": name, "ticker": ticker, "stueck": _int_or(n), "kaufkurs": round(price, 2),
+                       "kaufdatum": datetime.now().strftime("%Y-%m-%d"),
                        "news": name, "bot": True}
                 if ticker in ideas and ideas[ticker].get("heimat"):
                     new["heimat"] = ideas[ticker]["heimat"]
