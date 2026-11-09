@@ -5,3 +5,4 @@ requests>=2.31
 anthropic>=0.70
 lxml>=5.0
 ruamel.yaml>=0.18
+matplotlib>=3.8

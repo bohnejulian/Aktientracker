@@ -61,7 +61,7 @@ def save_state(state: dict) -> None:
 
 def notify(title: str, message: str, *, priority: int = 3, tags: list[str] | None = None,
            click: str | None = None, actions: list[tuple[str, str]] | None = None,
-           channel: str = "", attach: str | None = None, dry_run: bool = False) -> None:
+           channel: str = "", attach: str | None = None, image: bytes | None = None, dry_run: bool = False) -> None:
     """actions: [(Knopf-Text, Nachricht an den Eingangskanal)], max. 3. channel: z. B. "bot" -> <topic>-bot"""
     base = os.environ.get("NTFY_TOPIC")
     topic = f"{base}-{channel}" if base and channel else base
@@ -84,6 +84,23 @@ def notify(title: str, message: str, *, priority: int = 3, tags: list[str] | Non
     headers = {}
     if os.environ.get("NTFY_TOKEN"):
         headers["Authorization"] = f"Bearer {os.environ['NTFY_TOKEN']}"
+    if image:
+        # Bild direkt hochladen (PUT), alle anderen Felder als URL-Parameter
+        params = {k: v for k, v in payload.items() if k in ("title", "message", "priority", "click")}
+        params["filename"] = "kaufidee.png"
+        if tags:
+            params["tags"] = ",".join(tags)
+        if payload.get("actions"):
+            params["actions"] = json.dumps(payload["actions"], ensure_ascii=False)
+        for attempt in range(3):
+            try:
+                r = requests.put(f"{NTFY_SERVER}/{topic}", data=image, params=params, headers=headers, timeout=30)
+                r.raise_for_status()
+                return
+            except requests.RequestException as e:
+                log(f"ntfy-Bild fehlgeschlagen ({e}), Versuch {attempt + 1}/3")
+                time.sleep(2 * (attempt + 1))
+        payload.pop("attach", None)  # zur Not ohne Bild schicken
     for attempt in range(3):
         try:
             r = requests.post(NTFY_SERVER, json=payload, headers=headers, timeout=15)
@@ -998,6 +1015,8 @@ def maybe_scan(depot: dict, state: dict, now: datetime, dry_run: bool, force: bo
         sent[i["t"]] = today
     stats = load_stats()
     for i in ideas:
+        if example and i["kind"].startswith("Kein Signal"):
+            i["kind"] = "Rücksetzer im Aufwärtstrend"  # nur zur Veranschaulichung, Bild sagt "Beispielzahlen"
         i["odds"] = idea_odds(i, stats)
     if not example:
       state["last_ideas"] = {i["t"]: {"name": i["name"], "price": i["price"],
@@ -1005,32 +1024,36 @@ def maybe_scan(depot: dict, state: dict, now: datetime, dry_run: bool, force: bo
                                     **({"sektor": i["sektor"]} if i.get("sektor") else {}),
                                     **({"heimat": i["t"]} if "." not in i["t"] else {})} for i in ideas}
     for i in ideas:
-        f2 = fee(i["n"] * i["price"], cfg) * 2
-        body = [f"{i['kind']} · {i['idx']}" + (f" · {i['sektor']}" if i.get("sektor") else ""),
-                f"Kauf:   bis ~{eur(i['n'] * i['price'])} € ({i['n']} Stk. à {eur(i['price'])} €)" if i["n"] >= 1
-                else f"Kurs:   {eur(i['price'])} € (Budget zu klein)",
-                f"Stop:   {eur(i['stop'])} € (−{i['stop_pct'] * 100:.0f} %)",
-                f"Gebühr: ~{eur(f2)} € hin+zurück"]
+        import ideacard
         g = i.get("odds")
+        best = g["best"] if g else None
+        dauer, dauer2 = ideacard.horizon(i["kind"])
+        body = [f"{i['idx']}" + (f" · {i['sektor']}" if i.get("sektor") else "") + f" · {i['kind']}",
+                f"Dauer:  {dauer} ({dauer2})",
+                f"Kauf:   {i['n']} Stk. ≈ {eur(i['n'] * i['price'])} €" if i["n"] >= 1
+                else f"Kurs:   {eur(i['price'])} € (Budget zu klein)",
+                f"Ziel:   +{best} % (~{eur(i['price'] * (1 + best / 100))} €)" if best
+                else "Ziel:   keins, Gewinne laufen lassen",
+                f"Stop:   {eur(i['stop'])} € (−{i['stop_pct'] * 100:.0f} %)"]
         if g:
-            best = g["best"]
-            t = g["targets"][str(best)]
-            ch = " · ".join(f"+{x}%: {g['targets'][str(x)]['p_ziel'] * 100:.0f}%" for x in (5, 10, 20) if str(x) in g["targets"])
-            body.append("")
-            body.append(f"📊 Früher ({g['n']} ähnliche Fälle):")
-            body.append(f"Chance auf {ch}")
-            body.append(f"Stop gerissen: {t['p_stop'] * 100:.0f}% · Ø {pct(t['ev'] * 100)}/Trade")
-            body.append(f"👉 Verkaufen: bei +{best} % (~{eur(i['price'] * (1 + best / 100))} €)" if best
-                        else "👉 Verkaufen: kein festes Ziel, Stop nachziehen lassen")
+            t = g["targets"][str(best or 0)]
+            body.append(f"Chance +10 %: {g['targets']['10']['p_ziel'] * 100:.0f} % · Stop: {t['p_stop'] * 100:.0f} %"
+                        if "10" in g["targets"] else f"Stop gerissen: {t['p_stop'] * 100:.0f} %")
         body.append("")
         body.append(f"💡 {i['why'].split('. ')[0].rstrip('.')}.")
         if i.get("klumpen"):
             body.append(f"⚠️ Ihr habt schon {i['klumpen'] * 100:.0f} % {i['sektor']}, das erhöht das Klumpenrisiko.")
         body.append(IDEA_NOTE.strip())
         btn = [(f"Gekauft: {i['n']}× {i['name']}", f"kauf {i['t']} {i['n']}")] if i["n"] >= 1 and not example else None
+        try:
+            img = ideacard.render(i, g, beispiel=bool(example))
+        except Exception as e:  # noqa: BLE001
+            log(f"Ideen-Bild fehlgeschlagen: {e}")
+            img = None
         notify(f"{'🧪 BEISPIEL – ' if example else '💡 '}Kaufidee: {i['name']}", "\n".join(body), priority=4, tags=["bulb"], actions=btn,
-               attach=chart_url({"closes": i["closes"], "dates": i["dates"]}, 504, f"{i['name']} – 2 Jahre",
-                                [("Stop", i["stop"], "#dc2626")], sma200=True),
+               image=img,
+               attach=None if img else chart_url({"closes": i["closes"], "dates": i["dates"]}, 504, f"{i['name']} – 2 Jahre",
+                                                 [("Stop", i["stop"], "#dc2626")], sma200=True),
                click=f"https://finance.yahoo.com/quote/{urllib.parse.quote(i['t'])}", dry_run=dry_run)
 
 
