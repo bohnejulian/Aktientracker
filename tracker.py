@@ -1236,6 +1236,21 @@ def main() -> int:
         return 0
 
     if args.test:
+        if not args.dry_run:  # Selbsttest: kommen Bild + Knopf bei ntfy richtig an? (eigener Wegwerf-Kanal)
+            try:
+                import base64, uuid
+                tt = "selbsttest-" + uuid.uuid4().hex[:12]
+                png = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
+                acts = [{"action": "http", "label": "Gekauft: 9× Test", "method": "POST", "clear": True,
+                         "url": f"{NTFY_SERVER}/{tt}", "body": "kauf TEST 9"}]
+                r = requests.put(f"{NTFY_SERVER}/{tt}", data=png, timeout=20,
+                                 params={"title": "Test ü", "message": "a\nb", "filename": "k.png",
+                                         "actions": json.dumps(acts, ensure_ascii=False)})
+                m = r.json()
+                log(f"Bild-Selbsttest: HTTP {r.status_code}, Knöpfe {[(a.get('label'), a.get('body')) for a in m.get('actions') or []]}, "
+                    f"Anhang {bool(m.get('attachment'))}, Titel {m.get('title')!r}")
+            except Exception as e:  # noqa: BLE001
+                log(f"Bild-Selbsttest fehlgeschlagen: {e}")
         if os.environ.get("ANTHROPIC_API_KEY"):
             pos = (depot.get("positionen") or [{}])[0]
             sample = [(pos.get("name", "DAX"), f"{pos.get('name', 'DAX')}: Quartalszahlen über den Erwartungen", "", pos),

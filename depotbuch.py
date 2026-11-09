@@ -229,7 +229,9 @@ def process(depot_file: Path, msgs: list[dict], state: dict, fetch_quotes, notif
                 goal = (f"\n🎯 Gewinnziel-Alarm gesetzt bei {_eur(price * (1 + ideas[ticker]['ziel_prozent'] / 100))} € "
                         f"(+{ideas[ticker]['ziel_prozent']} %)")
             notify(f"✅ Gebucht: {_int_or(n)} × {name}", f"Kauf à {_eur(price)} € = {_eur(n * price)} € "
-                   f"+ ~{_eur(f)} € Gebühr\nFreies Budget jetzt: {_eur(doc['budget'])} €{goal}", priority=2,
+                   f"+ ~{_eur(f)} € Gebühr\nFreies Budget jetzt: {_eur(doc['budget'])} €{goal}"
+                   + ("\n⚠️ Budget fast leer: Unter ~1.500 € lohnt sich kein neuer Kauf (Gebühren). Neue Ideen "
+                      "kommen erst wieder, wenn ihr etwas verkauft oder das Budget erhöht." if doc["budget"] < 1500 else ""), priority=2,
                    tags=["white_check_mark"], dry_run=dry_run)
         else:
             if not pos:
