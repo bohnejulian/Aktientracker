@@ -76,9 +76,12 @@ def notify(title: str, message: str, *, priority: int = 3, tags: list[str] | Non
     melden = CFG.get("melden_url")
     if melden and base and not channel and len(payload.get("actions") or []) < 3:
         # Knopf zur Verkaufsseite: Kanal + Positionen stehen nur im #-Teil des Links (geht nie an einen Server)
-        pos = [[p.get("ticker"), str(p.get("name", p.get("ticker")))[:28], _num_or(p.get("stueck"))]
+        pos = [[p.get("ticker"), str(p.get("name", p.get("ticker")))[:28], _num_or(p.get("stueck")),
+                round((LAST_QUOTES.get(p.get("ticker")) or {}).get("price") or 0, 2)]
                for p in DEPOT.get("positionen") or [] if p.get("ticker")]
-        frag = urllib.parse.urlencode({"t": base, "p": json.dumps(pos, ensure_ascii=False, separators=(",", ":"))},
+        frag = urllib.parse.urlencode({"t": base, "p": json.dumps(pos, ensure_ascii=False, separators=(",", ":")),
+                                       "b": round(float(DEPOT.get("budget") or 0), 2),
+                                       "f": f"{CFG.get('gebuehr_prozent', 0.3)},{CFG.get('gebuehr_min', 15)}"},
                                       quote_via=urllib.parse.quote)
         payload.setdefault("actions", []).append({"action": "view", "label": "📝 Aktie verkaufen",
                                                   "url": f"{melden}#{frag}", "clear": False})
