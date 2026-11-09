@@ -85,14 +85,24 @@ def notify(title: str, message: str, *, priority: int = 3, tags: list[str] | Non
 
 # ---------------------------------------------------------------- Kurse
 
-PREFERRED_SUFFIXES = (".SG", ".DE", ".F", ".DU", ".MU", ".BE")  # Stuttgart zuerst, wie im Planspiel
+PREFERRED_SUFFIXES = (".DE", ".F", ".SG", ".MU", ".DU", ".BE", ".HM")  # deutsche Börsenplätze, Kurse in €
+
+
+def _has_eur_data(yf, symbol: str) -> bool:
+    try:
+        tk = yf.Ticker(symbol)
+        if len(tk.history(period="1mo", interval="1d")["Close"].dropna()) < 5:
+            return False
+        return (tk.fast_info.get("currency") or "").upper() == "EUR"
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def resolve_symbols(depot: dict, state: dict) -> None:
-    """Setzt item['ticker'] anhand der ISIN (Yahoo-Suche), Ergebnis wird gemerkt."""
+    """Setzt item['ticker'] anhand der ISIN: deutscher Börsenplatz in € mit echten Kursdaten."""
     import yfinance as yf
 
-    cache = state.setdefault("symbols", {})
+    cache = state.setdefault("symbols_eur", {})
     for item in all_items(depot):
         if item.get("ticker"):
             continue
@@ -103,19 +113,21 @@ def resolve_symbols(depot: dict, state: dict) -> None:
             item["ticker"] = cache[isin]
             continue
         try:
-            quotes = yf.Search(isin, max_results=20, news_count=0).quotes or []
+            found = yf.Search(isin, max_results=25, news_count=0).quotes or []
         except Exception as e:  # noqa: BLE001
             log(f"ISIN-Suche {isin} fehlgeschlagen: {e}")
-            quotes = []
-        symbols = [q.get("symbol") for q in quotes if q.get("symbol")]
-        pick = next((s for suf in PREFERRED_SUFFIXES for s in symbols if s.endswith(suf)), None)
-        pick = pick or (symbols[0] if symbols else None)
+            found = []
+        symbols = [q.get("symbol") for q in found if q.get("symbol")]
+        ordered = [s for suf in PREFERRED_SUFFIXES for s in symbols if s.endswith(suf)]
+        ordered += [s for s in symbols if s not in ordered]
+        log(f"{item.get('name', isin)}: Kandidaten {symbols}")
+        pick = next((s for s in ordered if _has_eur_data(yf, s)), None)
         if pick:
             log(f"{item.get('name', isin)}: {isin} -> {pick}")
             cache[isin] = pick
             item["ticker"] = pick
         else:
-            log(f"Kein Kurs-Kürzel für {item.get('name', isin)} ({isin}) gefunden – bitte 'ticker' eintragen")
+            log(f"Kein €-Kurs für {item.get('name', isin)} ({isin}) gefunden – bitte 'ticker' in depot.yaml eintragen")
 
 
 def fetch_quotes(tickers: list[str]) -> dict[str, dict]:
