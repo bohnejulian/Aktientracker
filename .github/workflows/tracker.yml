@@ -3,9 +3,9 @@ name: Aktien-Tracker
 on:
   schedule:
     # Zeiten in UTC! Werktags 07:00–22:45 deutsche Winterzeit, alle 15 Minuten
-    - cron: "*/15 6-21 * * 1-5"
+    - cron: "7,22,37,52 6-21 * * 1-5"   # nicht zur vollen Viertelstunde, da drängelt sich ganz GitHub
     # Wochenende: nur alle 3 Stunden (News)
-    - cron: "0 */3 * * 0,6"
+    - cron: "13 */3 * * 0,6"
   workflow_dispatch:
     inputs:
       test:
