@@ -1,0 +1,24 @@
+name: debug
+on: workflow_dispatch
+jobs:
+  d:
+    runs-on: ubuntu-latest
+    steps:
+      - run: pip install -q yfinance
+      - run: |
+          python - <<'PY'
+          import yfinance as yf
+          pairs = {"D6RH":"Deka Nasdaq","F3A":"First Solar","LHA":"Lufthansa","FB2A":"Meta","NVD":"Nvidia","PTX":"Palantir","RHM":"Rheinmetall","TKE":"Take-Two"}
+          for base,n in pairs.items():
+              for suf in (".SG",".DE",".F"):
+                  s=base+suf
+                  try:
+                      h=yf.Ticker(s).history(period="5d",interval="1d")["Close"].dropna()
+                      i=yf.Ticker(s).history(period="1d",interval="5m")["Close"].dropna()
+                      print(n,s,"daily",[round(x,2) for x in h.tolist()[-3:]],"intraday last",round(i.iloc[-1],2) if len(i) else None, i.index[-1] if len(i) else None)
+                  except Exception as e: print(n,s,"ERR",e)
+          for s in ("0P00000EK2.F","D6RG.SG","D6RG.F","D6RG.DU","D6RG.MU"):
+              try:
+                  h=yf.Ticker(s).history(period="1mo")["Close"].dropna(); print(s,[round(x,2) for x in h.tolist()[-3:]], h.index[-1] if len(h) else None)
+              except Exception as e: print(s,"ERR",e)
+          PY
