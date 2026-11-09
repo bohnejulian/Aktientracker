@@ -278,14 +278,14 @@ def assessment(item: dict, q: dict, depot: dict) -> str:
     # Schwankung und Positionsgröße (je wilder, desto kleiner)
     vol = a["vol"]
     if vol < 0.25:
-        risk, share = "niedrig", 0.25
+        risk, share = "niedrig", 0.35
     elif vol < 0.40:
-        risk, share = "mittel", 0.15
+        risk, share = "mittel", 0.25
     elif vol < 0.60:
-        risk, share = "hoch", 0.10
+        risk, share = "hoch", 0.15
     else:
-        risk, share = "sehr hoch", 0.06
-    share = min(share, float(cfg.get("max_anteil_pro_kauf", 25)) / 100)
+        risk, share = "sehr hoch", 0.08
+    share = min(share, float(cfg.get("max_anteil_pro_kauf", 35)) / 100)
     stop = stop_level(q)
     stop_pct = max(0.0, 1 - stop / p)
 
@@ -716,16 +716,22 @@ def check_auto_stops(depot: dict, quotes: dict, state: dict, dry_run: bool) -> N
 # ---------------------------------------------------------------- Kaufideen-Scan
 
 def maybe_scan(depot: dict, state: dict, now: datetime, dry_run: bool, force: bool = False) -> None:
+    """Scannt zu festen Zeiten, meldet sich aber NUR bei wirklich starken, neuen Kaufideen."""
     cfg = depot.get("einstellungen") or {}
-    hhmm = cfg.get("scan_uhrzeit", "08:30")
-    if not hhmm:
-        return
-    h, m = map(int, str(hhmm).split(":"))
-    slot = now.replace(hour=h, minute=m, second=0, microsecond=0)
+    times = cfg.get("scan_uhrzeiten") or ([cfg["scan_uhrzeit"]] if cfg.get("scan_uhrzeit") else [])
     today = now.strftime("%Y-%m-%d")
-    if not force and (state.get("scan_day") == today or not slot <= now < slot + timedelta(hours=3)):
+    done = state.setdefault("scans_done", [])
+    due = None
+    for hhmm in times:
+        h, m = map(int, str(hhmm).split(":"))
+        slot = now.replace(hour=h, minute=m, second=0, microsecond=0)
+        if slot <= now < slot + timedelta(hours=2) and f"{today} {hhmm}" not in done:
+            due = f"{today} {hhmm}"
+    if not force and not due:
         return
-    state["scan_day"] = today
+    if due:
+        done.append(due)
+        del done[:-20]
     import scanner
 
     uni = state.get("universe")
@@ -737,11 +743,17 @@ def maybe_scan(depot: dict, state: dict, now: datetime, dry_run: bool, force: bo
     held = {i.get("ticker") for i in all_items(depot)} | {i.get("heimat") for i in all_items(depot)}
     budget = float(depot.get("budget") or 0)
     ideas = scanner.scan(universe, held, analyse, fx_rate, budget,
-                         float(cfg.get("max_anteil_pro_kauf", 25)) / 100, log, int(cfg.get("scan_anzahl", 5)))
+                         float(cfg.get("max_anteil_pro_kauf", 35)) / 100, log, 20)
+    min_score = float(cfg.get("scan_min_score", 20))
+    sent = state.setdefault("ideas_sent", {})
+    for t in [t for t, d in sent.items() if (now.date() - datetime.fromisoformat(d).date()).days > 7]:
+        del sent[t]
+    ideas = [i for i in ideas if i["score"] >= min_score and i["t"] not in sent][:int(cfg.get("scan_anzahl", 2))]
+    log(f"Scan: {len(ideas)} starke neue Ideen (Schwelle {min_score})")
     if not ideas:
-        notify("💡 Kaufideen: heute nichts", f"{len(universe)} Aktien geprüft, kein klares Kaufsignal. "
-               "Nicht kaufen ist auch eine Entscheidung.", priority=2, tags=["bulb"], dry_run=dry_run)
-        return
+        return  # keine Mitteilung – nur melden, wenn es wirklich etwas Gutes gibt
+    for i in ideas:
+        sent[i["t"]] = today
     state["last_ideas"] = {i["t"]: {"name": i["name"], "price": i["price"],
                                     **({"heimat": i["t"]} if "." not in i["t"] else {})} for i in ideas}
     buttons = [(f"Gekauft: {i['n']}× {i['name']}", f"kauf {i['t']} {i['n']}") for i in ideas if i["n"] >= 1][:3]
@@ -752,17 +764,17 @@ def maybe_scan(depot: dict, state: dict, now: datetime, dry_run: bool, force: bo
         parts.append(f"{n}. {i['name']} ({i['idx']}) – {i['kind']}\n"
                      f"💶 {amount} · 🛑 Stop ~{eur(i['stop'])} € (−{i['stop_pct'] * 100:.0f} %)\n"
                      f"💡 {i['why']}")
-    notify(f"💡 {len(ideas)} Kaufideen für heute", "\n\n".join(parts)
+    notify(f"💡 Starke Kaufidee{'n' if len(ideas) > 1 else ''}: " + ", ".join(i["name"] for i in ideas), "\n\n".join(parts)
            + f"\n\nGeprüft: {len(universe)} Aktien aus DAX, MDAX, TecDAX, EuroStoxx50, Nasdaq 100, Dow. "
            "Bitte im Planspiel prüfen, ob die Aktie dort handelbar ist. Nach dem Kauf auf den Knopf tippen "
            "(oder z. B. „kauf SAP 5“ in den Kanal schreiben), dann bucht der Bot es ein." + DISCLAIMER,
-           priority=3, tags=["bulb"], actions=buttons, dry_run=dry_run)
+           priority=4, tags=["bulb"], actions=buttons, dry_run=dry_run)
 
 
 # ---------------------------------------------------------------- Bot-Kanal
 
 def bot_update(depot: dict, quotes: dict, state: dict, now: datetime, dry_run: bool) -> None:
-    """Alle 15 Min. Stand der Positionen, die über den Bot gekauft wurden, an <topic>-bot."""
+    """Prüft alle 15 Min. die Bot-Käufe, meldet sich aber nur, wenn sich die Empfehlung ändert oder starke News kommen."""
     bot_pos = [p for p in depot.get("positionen") or [] if p.get("bot")]
     if not bot_pos:
         return
@@ -797,6 +809,16 @@ def bot_update(depot: dict, quotes: dict, state: dict, now: datetime, dry_run: b
             rec = "⚠️ Wichtige negative News – lesen, ggf. Stop enger setzen"
         elif any(x.get("richtung") == "positiv" for x in strong) and not rec.startswith(("🛑", "🟡")):
             rec += " · 📰 starke positive News"
+        last_rec = state.setdefault("bot_rec", {})
+        news_seen_t = state.setdefault("bot_news_t", {})
+        new_strong = [x for x in strong if x["t"] > news_seen_t.get(name, 0)]
+        rec_key = rec.split(" ")[0] + rec.split("·")[0]
+        changed = last_rec.get(p.get("ticker")) != rec_key or bool(new_strong)
+        last_rec[p.get("ticker")] = rec_key
+        if new_strong:
+            news_seen_t[name] = max(x["t"] for x in new_strong)
+        if not changed:
+            continue
         line = (f"{name}: {eur(q['price'])} € ({pct((q['price'] / q['prev_close'] - 1) * 100)} heute, "
                 f"{pct((q['price'] / k - 1) * 100)} seit Kauf = {'+' if v - c >= 0 else ''}{eur(v - c)} €)\n"
                 f"   {rec} · Stop {eur(stop)}")
@@ -804,11 +826,14 @@ def bot_update(depot: dict, quotes: dict, state: dict, now: datetime, dry_run: b
             tag = f"🤖{x['relevanz']}/5 {x['richtung']}: " if x.get("relevanz") else ""
             line += f"\n   📰 {tag}{x['title'][:110]}"
         blocks.append(line)
+    if not blocks:
+        log("Bot-Käufe gecheckt, nichts Neues")
+        return
     head = (f"Bot-Depot: {eur(total_v)} € · heute {'+' if total_d >= 0 else ''}{eur(total_d)} € · "
             f"gesamt {pct((total_v / total_c - 1) * 100) if total_c else '–'}"
             f" · freies Budget {eur(float(depot.get('budget') or 0))} €")
-    notify(f"🤖 Bot-Käufe {now:%H:%M}", head + "\n\n" + "\n\n".join(blocks) + DISCLAIMER,
-           priority=1, tags=["robot"], dry_run=dry_run)
+    notify(f"🤖 Bot-Käufe: Empfehlung geändert", head + "\n\n" + "\n\n".join(blocks) + DISCLAIMER,
+           priority=3, tags=["robot"], dry_run=dry_run)
 
 
 # ---------------------------------------------------------------- Main

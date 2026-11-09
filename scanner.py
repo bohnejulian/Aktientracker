@@ -124,9 +124,14 @@ def scan(universe: dict, held: set[str], analyse, fx_rate, budget: float, max_sh
         else:
             continue
         vol = a["vol"]
-        share = 0.25 if vol < 0.25 else 0.15 if vol < 0.40 else 0.10 if vol < 0.60 else 0.06
+        # Wenige, dafür größere Trades: Einsatz je nach Schwankung
+        share = 0.35 if vol < 0.25 else 0.25 if vol < 0.40 else 0.15 if vol < 0.60 else 0.08
         share = min(share, max_share)
         score -= vol * 10  # ruhigere Aktien bevorzugen
+        perf6m = closes[-1] / closes[-126] - 1
+        score += max(-5.0, min(perf6m * 20, 10))  # langfristig starke Aktien haben mehr Potenzial
+        if perf6m >= 0.15:
+            why += f" Seit einem halben Jahr {perf6m * 100:+.0f} %, die Aktie hat also echten Rückenwind."
         p_eur = p
         if not (t.endswith(".DE") or t.endswith(".PA") or t.endswith(".AS") or t.endswith(".MI")
                 or t.endswith(".MC") or t.endswith(".BR") or t.endswith(".HE") or t.endswith(".IR")

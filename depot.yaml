@@ -101,10 +101,11 @@ einstellungen:
   max_news_pro_lauf: 5      # damit das Handy nicht explodiert
   news_max_alter_stunden: 6 # ältere Artikel werden ignoriert
   uebersicht_uhrzeiten: ["09:15", "17:45"]   # Depot-Übersicht (deutsche Zeit)
-  max_anteil_pro_kauf: 25   # nie mehr als 25 % des Budgets in einen Kauf
+  max_anteil_pro_kauf: 35   # nie mehr als 35 % des Budgets in einen Kauf (wenige, gute Trades)
   auto_stop: true           # nachgezogener Stop-Loss-Alarm für Positionen ohne eigene 'unter'-Marke
   # KI-Bewertung der News: läuft nur, wenn im Repo das Secret ANTHROPIC_API_KEY gesetzt ist
   ki_modell: claude-haiku-5-5   # günstigstes Modell, ca. 0,0003 $ pro Bewertung
-  scan_uhrzeit: "08:30"     # täglicher Kaufideen-Scan (leer = aus)
-  scan_anzahl: 5
+  scan_uhrzeiten: ["09:30", "15:45"]   # Scan nach Xetra- und nach US-Eröffnung
+  scan_anzahl: 2            # höchstens 2 Ideen pro Scan, nur wenn wirklich stark
+  scan_min_score: 20        # höher = strenger, weniger Meldungen
   ki_min_relevanz: 3        # Meldungen unter dieser Relevanz (1–5) werden nicht geschickt
