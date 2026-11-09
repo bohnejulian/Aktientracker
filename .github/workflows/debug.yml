@@ -1,0 +1,9 @@
+name: debug
+on: workflow_dispatch
+jobs:
+  d:
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: curl -s -d "hilfe" "https://ntfy.sh/${NTFY_TOPIC}-depot" > /dev/null && echo posted

@@ -60,15 +60,22 @@ def save_state(state: dict) -> None:
 # ---------------------------------------------------------------- ntfy
 
 def notify(title: str, message: str, *, priority: int = 3, tags: list[str] | None = None,
-           click: str | None = None, dry_run: bool = False) -> None:
+           click: str | None = None, actions: list[tuple[str, str]] | None = None,
+           dry_run: bool = False) -> None:
+    """actions: [(Knopf-Text, Nachricht an den Eingangskanal)], max. 3"""
     topic = os.environ.get("NTFY_TOPIC")
     payload = {"topic": topic, "title": title, "message": message, "priority": priority}
+    if actions and topic:
+        payload["actions"] = [{"action": "http", "label": label[:40], "method": "POST", "clear": True,
+                               "url": f"{NTFY_SERVER}/{topic}-depot", "body": body}
+                              for label, body in actions[:3]]
     if tags:
         payload["tags"] = tags
     if click:
         payload["click"] = click
     if dry_run or not topic:
-        log(f"[ntfy {'dry-run' if dry_run else 'KEIN NTFY_TOPIC'}] {title} | {message}")
+        log(f"[ntfy {'dry-run' if dry_run else 'KEIN NTFY_TOPIC'}] {title} | {message}"
+            + (f" | Knöpfe: {actions}" if actions else ""))
         return
     headers = {}
     if os.environ.get("NTFY_TOKEN"):
@@ -688,6 +695,8 @@ def check_auto_stops(depot: dict, quotes: dict, state: dict, dry_run: bool) -> N
                    + ".\nDer Kurs ist deutlich unter sein jüngstes Hoch gefallen. Verkaufen, Teil verkaufen "
                    "oder bewusst halten?\n\n" + assessment(item, q, depot) + DISCLAIMER,
                    priority=5, tags=["octagonal_sign"],
+                   actions=[("Alles verkauft", f"verkauf {t} alle"),
+                            ("Hälfte verkauft", f"verkauf {t} {max(1, int(float(item.get('stueck', 2)) // 2))}")],
                    click=f"https://finance.yahoo.com/quote/{urllib.parse.quote(t)}", dry_run=dry_run)
             armed[t] = True
         elif q["price"] > stop * 1.02:
@@ -723,6 +732,9 @@ def maybe_scan(depot: dict, state: dict, now: datetime, dry_run: bool, force: bo
         notify("💡 Kaufideen: heute nichts", f"{len(universe)} Aktien geprüft, kein klares Kaufsignal. "
                "Nicht kaufen ist auch eine Entscheidung.", priority=2, tags=["bulb"], dry_run=dry_run)
         return
+    state["last_ideas"] = {i["t"]: {"name": i["name"], "price": i["price"],
+                                    **({"heimat": i["t"]} if "." not in i["t"] else {})} for i in ideas}
+    buttons = [(f"Gekauft: {i['n']}× {i['name']}", f"kauf {i['t']} {i['n']}") for i in ideas if i["n"] >= 1][:3]
     parts = []
     for n, i in enumerate(ideas, 1):
         amount = (f"bis ~{eur(i['n'] * i['price'])} € ({i['n']} Stk. à ~{eur(i['price'])} €)" if i["n"] >= 1
@@ -732,8 +744,9 @@ def maybe_scan(depot: dict, state: dict, now: datetime, dry_run: bool, force: bo
                      f"💡 {i['why']}")
     notify(f"💡 {len(ideas)} Kaufideen für heute", "\n\n".join(parts)
            + f"\n\nGeprüft: {len(universe)} Aktien aus DAX, MDAX, TecDAX, EuroStoxx50, Nasdaq 100, Dow. "
-           "Bitte im Planspiel prüfen, ob die Aktie dort handelbar ist." + DISCLAIMER,
-           priority=3, tags=["bulb"], dry_run=dry_run)
+           "Bitte im Planspiel prüfen, ob die Aktie dort handelbar ist. Nach dem Kauf auf den Knopf tippen "
+           "(oder z. B. „kauf SAP 5“ in den Depot-Kanal schreiben), dann bucht der Bot es ein." + DISCLAIMER,
+           priority=3, tags=["bulb"], actions=buttons, dry_run=dry_run)
 
 
 # ---------------------------------------------------------------- Main
@@ -745,9 +758,18 @@ def main() -> int:
     ap.add_argument("--scan", action="store_true", help="Kaufideen-Scan sofort ausführen")
     args = ap.parse_args()
 
-    depot = yaml.safe_load(DEPOT_FILE.read_text()) or {}
     state = load_state()
     now = datetime.now(BERLIN)
+
+    # Trades aus dem ntfy-Eingangskanal einbuchen
+    want_status = []
+    if os.environ.get("NTFY_TOPIC") and not args.dry_run:
+        import depotbuch
+        msgs = depotbuch.fetch_inbox(NTFY_SERVER, os.environ["NTFY_TOPIC"], state, log)
+        if depotbuch.process(DEPOT_FILE, msgs, state, fetch_quotes, notify, lambda: want_status.append(1),
+                             log, args.dry_run):
+            log("depot.yaml aktualisiert")
+    depot = yaml.safe_load(DEPOT_FILE.read_text()) or {}
     resolve_symbols(depot, state)
     tickers = sorted({i["ticker"] for i in all_items(depot) if i.get("ticker")})
 
@@ -770,6 +792,9 @@ def main() -> int:
                    tags=["mag"], dry_run=args.dry_run)
         save_state(state)
         return 0
+
+    if want_status:
+        notify("📊 Depot-Übersicht", summary_text(depot, quotes), priority=2, tags=["bar_chart"], dry_run=args.dry_run)
 
     check_prices(depot, quotes, state, now.strftime("%Y-%m-%d"), args.dry_run)
     check_auto_stops(depot, quotes, state, args.dry_run)

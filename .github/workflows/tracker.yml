@@ -21,6 +21,9 @@ concurrency:
   group: tracker
   cancel-in-progress: false
 
+permissions:
+  contents: write   # damit per ntfy gemeldete Trades in depot.yaml gespeichert werden
+
 jobs:
   run:
     runs-on: ubuntu-latest
@@ -49,6 +52,16 @@ jobs:
           NTFY_TOKEN: ${{ secrets.NTFY_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: python tracker.py ${{ (github.event_name == 'workflow_dispatch' && inputs.scan) && '--scan' || ((github.event_name == 'workflow_dispatch' && inputs.test) && '--test' || '') }}
+
+      - name: Depot-Änderungen speichern
+        if: always()
+        run: |
+          if ! git diff --quiet depot.yaml; then
+            git config user.name "aktien-bot"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit -m "Depot aktualisiert (Trade per ntfy gemeldet)" depot.yaml
+            git pull --rebase origin main && git push origin HEAD:main
+          fi
 
       - name: Zustand speichern
         if: always()
