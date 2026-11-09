@@ -73,6 +73,15 @@ def notify(title: str, message: str, *, priority: int = 3, tags: list[str] | Non
         payload["actions"] = [{"action": "http", "label": label[:40], "method": "POST", "clear": True,
                                "url": f"{NTFY_SERVER}/{base}", "body": body}
                               for label, body in actions[:3]]
+    melden = CFG.get("melden_url")
+    if melden and base and not channel and len(payload.get("actions") or []) < 3:
+        # Knopf zur Verkaufsseite: Kanal + Positionen stehen nur im #-Teil des Links (geht nie an einen Server)
+        pos = [[p.get("ticker"), str(p.get("name", p.get("ticker")))[:28], _num_or(p.get("stueck"))]
+               for p in DEPOT.get("positionen") or [] if p.get("ticker")]
+        frag = urllib.parse.urlencode({"t": base, "p": json.dumps(pos, ensure_ascii=False, separators=(",", ":"))},
+                                      quote_via=urllib.parse.quote)
+        payload.setdefault("actions", []).append({"action": "view", "label": "📝 Aktie verkaufen",
+                                                  "url": f"{melden}#{frag}", "clear": False})
     if tags:
         payload["tags"] = tags
     if click:
@@ -855,6 +864,15 @@ def check_earnings(depot: dict, state: dict, now: datetime, dry_run: bool) -> li
 # ---------------------------------------------------------------- Auto-Stop-Loss
 
 CFG: dict = {}
+DEPOT: dict = {}  # aktuelles Depot (für den Verkaufen-Knopf)
+
+
+def _num_or(x):
+    try:
+        f = float(x)
+        return int(f) if f.is_integer() else f
+    except (TypeError, ValueError):
+        return 0
 STATE: dict = {}        # Zustand dieses Laufs (für Branchen-Cache)
 LAST_QUOTES: dict = {}  # Kurse dieses Laufs
 
@@ -1207,6 +1225,8 @@ def main() -> int:
     depot = yaml.safe_load(DEPOT_FILE.read_text()) or {}
     CFG.clear()
     CFG.update(depot.get("einstellungen") or {})
+    DEPOT.clear()
+    DEPOT.update(depot)
     resolve_symbols(depot, state)
     tickers = sorted({i["ticker"] for i in all_items(depot) if i.get("ticker")})
 

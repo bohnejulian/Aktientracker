@@ -144,6 +144,7 @@ einstellungen:
   max_news_pro_lauf: 5      # damit das Handy nicht explodiert
   news_max_alter_stunden: 6 # ältere Artikel werden ignoriert
   uebersicht_uhrzeiten: ["09:15", "17:45"]   # Depot-Übersicht (deutsche Zeit)
+  melden_url: "https://bohnejulian.github.io/aktientracker-verkauf/"  # Seite hinter dem Knopf „Aktie verkaufen“
   max_sektor_prozent: 50    # Warnung, wenn eine Branche mehr als 50 % des Depots ausmacht
   max_anteil_pro_kauf: 35   # nie mehr als 35 % des Budgets in einen Kauf (wenige, gute Trades)
   auto_stop: true           # nachgezogener Stop-Loss-Alarm für Positionen ohne eigene 'unter'-Marke
