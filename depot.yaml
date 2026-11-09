@@ -105,4 +105,6 @@ einstellungen:
   auto_stop: true           # nachgezogener Stop-Loss-Alarm für Positionen ohne eigene 'unter'-Marke
   # KI-Bewertung der News: läuft nur, wenn im Repo das Secret ANTHROPIC_API_KEY gesetzt ist
   ki_modell: claude-haiku-5-5   # günstigstes Modell, ca. 0,0003 $ pro Bewertung
+  scan_uhrzeit: "08:30"     # täglicher Kaufideen-Scan (leer = aus)
+  scan_anzahl: 5
   ki_min_relevanz: 3        # Meldungen unter dieser Relevanz (1–5) werden nicht geschickt

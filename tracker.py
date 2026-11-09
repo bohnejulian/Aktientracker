@@ -267,6 +267,20 @@ def assessment(item: dict, q: dict, depot: dict) -> str:
     if a["perf1m"] is not None and abs(a["perf1m"]) >= 0.1:
         why.append(f"Im letzten Monat: {pct(a['perf1m'] * 100)}.")
 
+    # Schwankung und Positionsgröße (je wilder, desto kleiner)
+    vol = a["vol"]
+    if vol < 0.25:
+        risk, share = "niedrig", 0.25
+    elif vol < 0.40:
+        risk, share = "mittel", 0.15
+    elif vol < 0.60:
+        risk, share = "hoch", 0.10
+    else:
+        risk, share = "sehr hoch", 0.06
+    share = min(share, float(cfg.get("max_anteil_pro_kauf", 25)) / 100)
+    stop = stop_level(q)
+    stop_pct = max(0.0, 1 - stop / p)
+
     lines = [horizon, f"📌 {signal}"]
     if budget > 0 and buy_ok:
         amount = budget * share
@@ -277,12 +291,11 @@ def assessment(item: dict, q: dict, depot: dict) -> str:
             lines.append(f"💶 Budget ({eur(budget)} €) reicht für keinen sinnvollen Kauf")
     elif budget > 0:
         lines.append("💶 Aktuell kein Nachkauf vorgeschlagen")
-    lines.append(f"🛑 Stop-Loss-Idee: ~{eur(p * (1 - stop_pct))} {cur} (−{stop_pct * 100:.0f} %) · Schwankung {risk} ({vol * 100:.0f} %/J.)")
+    lines.append(f"🛑 Stop-Loss: ~{eur(stop)} {cur} (−{stop_pct * 100:.0f} % vom Kurs) · Schwankung {risk} ({vol * 100:.0f} %/J.)")
     if owned and item.get("kaufkurs"):
         lines.append(f"Seit Kauf: {pct((p / float(item['kaufkurs']) - 1) * 100)}")
-    why.append(f"Betrag und Stop richten sich nach der Schwankung (hier ~{vol * 100:.0f} % im Jahr): Je wilder "
-               "die Aktie, desto kleiner der Einsatz und desto mehr Abstand zum Stop, damit normales Zappeln "
-               "keinen Verkauf auslöst, ein echter Absturz aber schon.")
+    why.append(f"Einsatz und Stop-Abstand richten sich nach der Schwankung (~{vol * 100:.0f} % im Jahr): "
+               "je wilder, desto kleiner der Einsatz und desto mehr Luft bis zum Stop.")
     lines.append("\n💡 Warum? " + " ".join(why))
     return "\n".join(lines)
 
@@ -681,12 +694,55 @@ def check_auto_stops(depot: dict, quotes: dict, state: dict, dry_run: bool) -> N
             armed[t] = False
 
 
+# ---------------------------------------------------------------- Kaufideen-Scan
+
+def maybe_scan(depot: dict, state: dict, now: datetime, dry_run: bool, force: bool = False) -> None:
+    cfg = depot.get("einstellungen") or {}
+    hhmm = cfg.get("scan_uhrzeit", "08:30")
+    if not hhmm:
+        return
+    h, m = map(int, str(hhmm).split(":"))
+    slot = now.replace(hour=h, minute=m, second=0, microsecond=0)
+    today = now.strftime("%Y-%m-%d")
+    if not force and (state.get("scan_day") == today or not slot <= now < slot + timedelta(hours=3)):
+        return
+    state["scan_day"] = today
+    import scanner
+
+    uni = state.get("universe")
+    if not uni or uni.get("week") != now.strftime("%G-%V"):
+        loaded = scanner.load_universe(log)
+        uni = {"week": now.strftime("%G-%V"), "items": {t: list(v) for t, v in loaded.items()}}
+        state["universe"] = uni
+    universe = {t: tuple(v) for t, v in uni["items"].items()}
+    held = {i.get("ticker") for i in all_items(depot)} | {i.get("heimat") for i in all_items(depot)}
+    budget = float(depot.get("budget") or 0)
+    ideas = scanner.scan(universe, held, analyse, fx_rate, budget,
+                         float(cfg.get("max_anteil_pro_kauf", 25)) / 100, log, int(cfg.get("scan_anzahl", 5)))
+    if not ideas:
+        notify("💡 Kaufideen: heute nichts", f"{len(universe)} Aktien geprüft, kein klares Kaufsignal. "
+               "Nicht kaufen ist auch eine Entscheidung.", priority=2, tags=["bulb"], dry_run=dry_run)
+        return
+    parts = []
+    for n, i in enumerate(ideas, 1):
+        amount = (f"bis ~{eur(i['n'] * i['price'])} € ({i['n']} Stk. à ~{eur(i['price'])} €)" if i["n"] >= 1
+                  else f"Kurs ~{eur(i['price'])} €, Budget reicht nicht")
+        parts.append(f"{n}. {i['name']} ({i['idx']}) – {i['kind']}\n"
+                     f"💶 {amount} · 🛑 Stop ~{eur(i['stop'])} € (−{i['stop_pct'] * 100:.0f} %)\n"
+                     f"💡 {i['why']}")
+    notify(f"💡 {len(ideas)} Kaufideen für heute", "\n\n".join(parts)
+           + f"\n\nGeprüft: {len(universe)} Aktien aus DAX, MDAX, TecDAX, EuroStoxx50, Nasdaq 100, Dow. "
+           "Bitte im Planspiel prüfen, ob die Aktie dort handelbar ist." + DISCLAIMER,
+           priority=3, tags=["bulb"], dry_run=dry_run)
+
+
 # ---------------------------------------------------------------- Main
 
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--test", action="store_true", help="Test-Mitteilung + Übersicht senden")
     ap.add_argument("--dry-run", action="store_true", help="nichts senden, nur anzeigen")
+    ap.add_argument("--scan", action="store_true", help="Kaufideen-Scan sofort ausführen")
     args = ap.parse_args()
 
     depot = yaml.safe_load(DEPOT_FILE.read_text()) or {}
@@ -698,6 +754,11 @@ def main() -> int:
     log(f"Hole Kurse für {len(tickers)} Werte …")
     quotes = fetch_quotes(tickers)
     log(f"{len(quotes)}/{len(tickers)} Kurse erhalten")
+
+    if args.scan:
+        maybe_scan(depot, state, now, args.dry_run, force=True)
+        save_state(state)
+        return 0
 
     if args.test:
         notify("✅ Tracker läuft!", "Testnachricht vom Aktien-Tracker.\n\n" + summary_text(depot, quotes),
@@ -718,6 +779,10 @@ def main() -> int:
         log(f"Zahlen-Termine fehlgeschlagen: {e}")
     if now.weekday() < 5:
         maybe_summary(depot, quotes, state, now, args.dry_run)
+        try:
+            maybe_scan(depot, state, now, args.dry_run)
+        except Exception as e:  # noqa: BLE001
+            log(f"Scan fehlgeschlagen: {e}")
     check_news(depot, quotes, state, now, args.dry_run)
 
     if tickers and not quotes:

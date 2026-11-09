@@ -3,3 +3,4 @@ feedparser>=6.0
 PyYAML>=6.0
 requests>=2.31
 anthropic>=0.70
+lxml>=5.0

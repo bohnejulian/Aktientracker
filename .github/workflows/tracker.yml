@@ -12,6 +12,10 @@ on:
         description: "Testnachricht schicken?"
         type: boolean
         default: true
+      scan:
+        description: "Kaufideen-Scan jetzt ausführen?"
+        type: boolean
+        default: false
 
 concurrency:
   group: tracker
@@ -20,7 +24,7 @@ concurrency:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
     steps:
       - uses: actions/checkout@v4
 
@@ -44,7 +48,7 @@ jobs:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           NTFY_TOKEN: ${{ secrets.NTFY_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: python tracker.py ${{ (github.event_name == 'workflow_dispatch' && inputs.test) && '--test' || '' }}
+        run: python tracker.py ${{ (github.event_name == 'workflow_dispatch' && inputs.scan) && '--scan' || ((github.event_name == 'workflow_dispatch' && inputs.test) && '--test' || '') }}
 
       - name: Zustand speichern
         if: always()
