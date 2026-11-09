@@ -32,6 +32,7 @@ positionen:
   - name: First Solar
     isin: US3364331070
     ticker: F3A.DE
+    heimat: FSLR        # für Quartalszahlen-Termine
     stueck: 5
     kaufkurs: 178.00
     news: First Solar
@@ -46,6 +47,7 @@ positionen:
   - name: Meta
     isin: US30303M1027
     ticker: FB2A.DE
+    heimat: META        # für Quartalszahlen-Termine
     stueck: 10
     kaufkurs: 550.10
     news: Meta Platforms
@@ -53,6 +55,7 @@ positionen:
   - name: Nvidia
     isin: US67066G1040
     ticker: NVD.DE
+    heimat: NVDA        # für Quartalszahlen-Termine
     stueck: 45
     kaufkurs: 158.60
     news: Nvidia
@@ -60,6 +63,7 @@ positionen:
   - name: Palantir
     isin: US69608A1088
     ticker: PTX.DE
+    heimat: PLTR        # für Quartalszahlen-Termine
     stueck: 10
     kaufkurs: 151.76
     news: Palantir
@@ -74,6 +78,7 @@ positionen:
   - name: Take-Two Interactive
     isin: US8740541094
     ticker: TKE.DE
+    heimat: TTWO        # für Quartalszahlen-Termine
     stueck: 5
     kaufkurs: 194.90
     news: Take-Two
@@ -97,3 +102,7 @@ einstellungen:
   news_max_alter_stunden: 6 # ältere Artikel werden ignoriert
   uebersicht_uhrzeiten: ["09:15", "17:45"]   # Depot-Übersicht (deutsche Zeit)
   max_anteil_pro_kauf: 25   # nie mehr als 25 % des Budgets in einen Kauf
+  auto_stop: true           # nachgezogener Stop-Loss-Alarm für Positionen ohne eigene 'unter'-Marke
+  # KI-Bewertung der News: läuft nur, wenn im Repo das Secret ANTHROPIC_API_KEY gesetzt ist
+  ki_modell: claude-haiku-5-5   # günstigstes Modell, ca. 0,0003 $ pro Bewertung
+  ki_min_relevanz: 3        # Meldungen unter dieser Relevanz (1–5) werden nicht geschickt

@@ -214,15 +214,25 @@ def assessment(item: dict, q: dict, depot: dict) -> str:
     up_long = a["sma200"] is not None and p > a["sma200"] and (a["sma50"] or p) > a["sma200"]
     below_200 = a["sma200"] is not None and p < a["sma200"]
 
+    d200 = (p / a["sma200"] - 1) * 100 if a["sma200"] else None
+    why = []
+
     # Horizont
     if is_fund:
         horizon = "🕰 Langfristig (breit gestreut, Basisbaustein)"
+        why.append("Ein Fonds/ETF steckt in vielen Firmen gleichzeitig. Fällt eine, fangen die anderen das ab, "
+                   "deshalb schwankt er weniger und eignet sich zum Liegenlassen.")
     elif up_long:
         horizon = "🕰 Eher langfristig halten (stabiler Aufwärtstrend)"
+        why.append(f"Der Kurs liegt {d200:.0f} % über seinem Durchschnitt der letzten 200 Tage, und auch der "
+                   "50-Tage-Schnitt liegt darüber. Seit Monaten haben also die Käufer die Oberhand.")
     elif below_200:
         horizon = "⚡ Eher kurzfristig/spekulativ (Abwärtstrend)"
+        why.append(f"Der Kurs liegt {abs(d200):.0f} % unter seinem 200-Tage-Durchschnitt. Seit Monaten überwiegen "
+                   "die Verkäufer, Erholungen sind in so einer Phase oft nur kurz.")
     else:
         horizon = "↔️ Seitwärts, eher abwarten"
+        why.append("Der Kurs pendelt um seinen 200-Tage-Durchschnitt, es gibt keinen klaren Trend.")
 
     # Signal
     owned = bool(item.get("stueck"))
@@ -230,31 +240,32 @@ def assessment(item: dict, q: dict, depot: dict) -> str:
     if a["rsi"] >= 70:
         signal = f"Überkauft (RSI {a['rsi']:.0f}) – nicht hinterherkaufen" + (", Teilgewinn überlegen" if owned else "")
         buy_ok = False
+        why.append("In den letzten 14 Handelstagen ging es fast nur nach oben. Nach so einem Lauf nehmen viele "
+                   "Anleger Gewinne mit, und der Kurs setzt oft zurück. Wer jetzt kauft, kauft teuer.")
     elif a["rsi"] <= 30 and up_long:
         signal = f"Rücksetzer im Aufwärtstrend (RSI {a['rsi']:.0f}) – mögliche Nachkauf-Chance"
+        why.append("Kurzfristig ist die Aktie stark gefallen, obwohl der langfristige Trend nach oben zeigt. "
+                   "Solche Dellen wurden in Aufwärtstrends oft wieder aufgeholt, man kauft also günstiger ein. "
+                   "Vorher prüfen, ob schlechte News dahinterstecken.")
     elif a["rsi"] <= 30:
         signal = f"Stark gefallen (RSI {a['rsi']:.0f}), Trend aber schwach – fallendes Messer, vorsichtig"
         buy_ok = False
+        why.append("Die Aktie ist stark gefallen, und es gibt keinen Aufwärtstrend, der sie stützt. "
+                   "„Billig“ kann hier noch billiger werden.")
     elif below_200:
         signal = "Unter der 200-Tage-Linie – erst Bodenbildung abwarten"
         buy_ok = False
+        why.append("Ein Kauf wäre eine Wette auf die Trendwende. Sicherer ist es zu warten, bis der Kurs wieder über "
+                   f"dem 200-Tage-Schnitt (~{eur(a['sma200'])}) steht.")
     elif a["pos52"] >= 0.95:
         signal = "Nahe 52-Wochen-Hoch – Trend intakt, aber Einstieg teuer"
+        why.append(f"Sie steht fast auf dem höchsten Kurs des Jahres ({eur(a['hi'])}). Der Trend ist stark, "
+                   "aber bei einem Rückschlag gibt es wenig Puffer.")
     else:
         signal = "Keine Auffälligkeit im Chart"
-
-    # Schwankung und Positionsgröße (je wilder, desto kleiner)
-    vol = a["vol"]
-    if vol < 0.25:
-        risk, share = "niedrig", 0.25
-    elif vol < 0.40:
-        risk, share = "mittel", 0.15
-    elif vol < 0.60:
-        risk, share = "hoch", 0.10
-    else:
-        risk, share = "sehr hoch", 0.06
-    share = min(share, float(cfg.get("max_anteil_pro_kauf", 25)) / 100)
-    stop_pct = min(max(vol * 0.35, 0.05), 0.25)
+        why.append("Sie ist weder überkauft noch überverkauft.")
+    if a["perf1m"] is not None and abs(a["perf1m"]) >= 0.1:
+        why.append(f"Im letzten Monat: {pct(a['perf1m'] * 100)}.")
 
     lines = [horizon, f"📌 {signal}"]
     if budget > 0 and buy_ok:
@@ -269,6 +280,10 @@ def assessment(item: dict, q: dict, depot: dict) -> str:
     lines.append(f"🛑 Stop-Loss-Idee: ~{eur(p * (1 - stop_pct))} {cur} (−{stop_pct * 100:.0f} %) · Schwankung {risk} ({vol * 100:.0f} %/J.)")
     if owned and item.get("kaufkurs"):
         lines.append(f"Seit Kauf: {pct((p / float(item['kaufkurs']) - 1) * 100)}")
+    why.append(f"Betrag und Stop richten sich nach der Schwankung (hier ~{vol * 100:.0f} % im Jahr): Je wilder "
+               "die Aktie, desto kleiner der Einsatz und desto mehr Abstand zum Stop, damit normales Zappeln "
+               "keinen Verkauf auslöst, ein echter Absturz aber schon.")
+    lines.append("\n💡 Warum? " + " ".join(why))
     return "\n".join(lines)
 
 
@@ -362,7 +377,9 @@ def summary_text(depot: dict, quotes: dict) -> str:
         day_diff += (q["price"] - q["prev_close"]) * n
         perf = (value / cost - 1) * 100 if cost else 0
         lines.append(f"{name}: {eur(q['price'])} ({pct((q['price'] / q['prev_close'] - 1) * 100)} heute, "
-                     f"{pct(perf)} seit Kauf) [{short_horizon(p, q)}]")
+                     f"{pct(perf)} seit Kauf) [{short_horizon(p, q)}]"
+                     + (f" Stop {eur(float(p['unter']) if p.get('unter') is not None else stop_level(q))}"
+                        if (depot.get("einstellungen") or {}).get("auto_stop", True) or p.get("unter") is not None else ""))
         weights.append((value, name))
     if total_cost:
         lines.append("")
@@ -381,6 +398,8 @@ def summary_text(depot: dict, quotes: dict) -> str:
             watch.append(f"{w.get('name', w.get('ticker'))} {pct((q['price'] / q['prev_close'] - 1) * 100)}")
     if watch:
         lines.append("Watchlist: " + ", ".join(watch))
+    if depot.get("_termine"):
+        lines.append("🗓 Zahlen in den nächsten 7 Tagen: " + ", ".join(depot["_termine"]))
     return "\n".join(lines)
 
 
@@ -457,13 +476,33 @@ def check_news(depot: dict, quotes: dict, state: dict, now: datetime, dry_run: b
         if first_time:
             seeded.append(query)
 
-    for label, title, link, item in fresh[:budget]:
+    ratings = ki_rate(depot, fresh) if fresh else None
+    if ratings is not None:
+        min_rel = int(cfg.get("ki_min_relevanz", 3))
+        kept = []
+        for i, f in enumerate(fresh):
+            r = ratings.get(i)
+            if r and r["relevanz"] >= min_rel:
+                kept.append((r["relevanz"], f, r))
+        log(f"KI: {len(kept)}/{len(fresh)} Meldungen relevant")
+        kept.sort(key=lambda x: -x[0])
+        fresh = [f for _, f, _ in kept]
+        ratings = {id(f): r for _, f, r in kept}
+
+    for f in fresh[:budget]:
+        label, title, link, item = f
         msg = title
+        prio = 3
+        r = ratings.get(id(f)) if ratings else None
+        if r:
+            icon = {"positiv": "🟢", "negativ": "🔴"}.get(r["richtung"], "⚪")
+            msg += f"\n🤖 {icon} {r['richtung']} · Relevanz {r['relevanz']}/5: {r['einschaetzung']}"
+            prio = 4 if r["relevanz"] >= 5 else 3
         q = quotes.get(item.get("ticker")) if item else None
         if q:
             chg = (q["price"] / q["prev_close"] - 1) * 100
             msg += f"\n\nKurs {eur(q['price'])} {q['currency']} ({pct(chg)} heute)\n" + assessment(item, q, depot) + DISCLAIMER
-        notify(f"📰 {label}", msg, priority=3, tags=["newspaper"], click=link, dry_run=dry_run)
+        notify(f"📰 {label}", msg, priority=prio, tags=["newspaper"], click=link, dry_run=dry_run)
     if len(fresh) > budget:
         notify("📰 Weitere News", f"{len(fresh) - budget} weitere Meldungen, z. B.: "
                + "; ".join(f[1] for f in fresh[budget:budget + 3]),
@@ -473,6 +512,173 @@ def check_news(depot: dict, quotes: dict, state: dict, now: datetime, dry_run: b
     cutoff = now.timestamp() - 3 * 86400
     for k in [k for k, ts in seen.items() if ts < cutoff]:
         del seen[k]
+
+
+# ---------------------------------------------------------------- KI-Bewertung (optional)
+
+KI_SYSTEM = (
+    "Du bewertest Börsen-Schlagzeilen für ein Schüler-Team im Planspiel Börse (Spielgeld, läuft bis Januar). "
+    "Für jede Schlagzeile: Wie relevant ist sie für den Kurs der genannten Aktie bzw. den Markt in den nächsten "
+    "Tagen bis Wochen (1 = Werbung/Rauschen/Wiederholung, 3 = lesenswert, 5 = kann den Kurs deutlich bewegen, "
+    "z. B. Quartalszahlen, Prognoseänderung, Übernahme, Ermittlungen, Großauftrag)? Richtung: positiv, negativ "
+    "oder neutral für die Aktie. Einschätzung: ein kurzer deutscher Satz (max. 120 Zeichen), was das für das Team "
+    "bedeutet. Sei nüchtern, keine Garantien."
+)
+
+KI_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "bewertungen": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "nr": {"type": "integer"},
+                    "relevanz": {"type": "integer"},
+                    "richtung": {"type": "string", "enum": ["positiv", "negativ", "neutral"]},
+                    "einschaetzung": {"type": "string"},
+                },
+                "required": ["nr", "relevanz", "richtung", "einschaetzung"],
+                "additionalProperties": False,
+            },
+        }
+    },
+    "required": ["bewertungen"],
+    "additionalProperties": False,
+}
+
+
+def ki_rate(depot: dict, fresh: list) -> dict[int, dict] | None:
+    """Bewertet Schlagzeilen mit Claude. None = keine KI (kein Key oder Fehler) -> alles normal schicken."""
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        return None
+    try:
+        import anthropic
+    except ImportError:
+        log("Paket 'anthropic' fehlt, KI-Bewertung aus")
+        return None
+
+    held = {i.get("name") for i in depot.get("positionen") or []}
+    lines = []
+    for n, (label, title, _link, item) in enumerate(fresh):
+        tag = "im Depot" if label in held else ("Watchlist" if item else "Gesamtmarkt")
+        lines.append(f"{n}. [{label}, {tag}] {title}")
+    model = (depot.get("einstellungen") or {}).get("ki_modell", "claude-haiku-5-5")
+    try:
+        client = anthropic.Anthropic(max_retries=2, timeout=60.0)
+        resp = client.messages.create(
+            model=model,
+            max_tokens=4000,
+            system=KI_SYSTEM,
+            output_config={"effort": "low", "format": {"type": "json_schema", "schema": KI_SCHEMA}},
+            messages=[{"role": "user", "content": "Schlagzeilen:\n" + "\n".join(lines)}],
+        )
+    except anthropic.APIStatusError as e:
+        log(f"KI-Fehler {e.status_code}: {e.message}")
+        return None
+    except anthropic.APIConnectionError as e:
+        log(f"KI nicht erreichbar: {e}")
+        return None
+    if resp.stop_reason != "end_turn":
+        log(f"KI-Antwort unvollständig ({resp.stop_reason})")
+        return None
+    text = next((b.text for b in resp.content if b.type == "text"), "")
+    try:
+        data = json.loads(text)["bewertungen"]
+    except (json.JSONDecodeError, KeyError, TypeError):
+        log("KI-Antwort nicht lesbar")
+        return None
+    log(f"KI: {resp.usage.input_tokens} Eingabe-, {resp.usage.output_tokens} Ausgabe-Tokens")
+    out = {}
+    for r in data:
+        if isinstance(r.get("nr"), int) and 0 <= r["nr"] < len(fresh):
+            r["relevanz"] = max(1, min(5, int(r.get("relevanz", 3))))
+            r["einschaetzung"] = str(r.get("einschaetzung", ""))[:160]
+            out[r["nr"]] = r
+    return out
+
+
+# ---------------------------------------------------------------- Quartalszahlen
+
+def check_earnings(depot: dict, state: dict, now: datetime, dry_run: bool) -> list[str]:
+    """Warnt einmal am Vortag (freitags auch fürs Wochenende/Montag) vor Quartalszahlen.
+    Gibt Termine der nächsten 7 Tage für die Übersicht zurück."""
+    import yfinance as yf
+
+    cache = state.setdefault("earnings", {})
+    warned = state.setdefault("earnings_warned", [])
+    today = now.date()
+    upcoming = []
+    for item in all_items(depot):
+        if item.get("art") in ("etf", "fonds"):
+            continue
+        sym = item.get("heimat") or item.get("ticker")
+        if not sym:
+            continue
+        c = cache.get(sym)
+        if not c or c.get("abgerufen") != today.isoformat():
+            date = None
+            try:
+                cal = yf.Ticker(sym).calendar or {}
+                dates = cal.get("Earnings Date") or []
+                future = sorted(d for d in dates if d >= today)
+                date = future[0].isoformat() if future else None
+            except Exception as e:  # noqa: BLE001
+                log(f"Zahlen-Termin {sym} nicht abrufbar: {e}")
+            c = cache[sym] = {"datum": date, "abgerufen": today.isoformat()}
+        if not c.get("datum"):
+            continue
+        d = datetime.fromisoformat(c["datum"]).date()
+        days = (d - today).days
+        if 0 <= days <= 7:
+            upcoming.append(f"{item.get('name', sym)} {d:%d.%m.}")
+        lookahead = 3 if today.weekday() == 4 else 1
+        key = f"{sym}:{c['datum']}"
+        if 1 <= days <= lookahead and key not in warned:
+            when = "morgen" if days == 1 else f"am {['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'][d.weekday()]} {d:%d.%m.}"
+            own = item.get("stueck")
+            notify(f"🗓 {item.get('name', sym)}: Quartalszahlen {when}",
+                   ("Ihr haltet " + str(own) + " Stück. " if own else "")
+                   + "An Zahlen-Tagen sind Sprünge von ±10 % normal. Vorher überlegen: halten, Teil verkaufen "
+                   "oder Stop-Loss setzen? US-Firmen melden meist nach US-Börsenschluss (nachts bei uns), "
+                   "die Reaktion kommt dann am nächsten Morgen.",
+                   priority=4, tags=["calendar"], dry_run=dry_run)
+            warned.append(key)
+    del warned[:-100]
+    return upcoming
+
+
+# ---------------------------------------------------------------- Auto-Stop-Loss
+
+def stop_level(q: dict) -> float:
+    """Nachgezogener Stop: höchster Schlusskurs der letzten 20 Tage minus schwankungsabhängiger Abstand."""
+    a = analyse(q["closes"])
+    stop_pct = min(max(a["vol"] * 0.35, 0.05), 0.25)
+    return max(q["closes"][-20:] + [q["price"]]) * (1 - stop_pct)
+
+
+def check_auto_stops(depot: dict, quotes: dict, state: dict, dry_run: bool) -> None:
+    if not (depot.get("einstellungen") or {}).get("auto_stop", True):
+        return
+    armed = state.setdefault("auto_stop_hit", {})
+    for item in depot.get("positionen") or []:
+        t = item.get("ticker")
+        q = quotes.get(t)
+        if not q or item.get("unter") is not None:
+            continue  # eigene Marke hat Vorrang
+        stop = stop_level(q)
+        if q["price"] <= stop and not armed.get(t):
+            loss = (q["price"] / float(item["kaufkurs"]) - 1) * 100 if item.get("kaufkurs") else None
+            notify(f"🛑 {item.get('name', t)} unter Stop-Loss {eur(stop)}",
+                   f"Kurs {eur(q['price'])} {q['currency']}"
+                   + (f", seit Kauf {pct(loss)}" if loss is not None else "")
+                   + ".\nDer Kurs ist deutlich unter sein jüngstes Hoch gefallen. Verkaufen, Teil verkaufen "
+                   "oder bewusst halten?\n\n" + assessment(item, q, depot) + DISCLAIMER,
+                   priority=5, tags=["octagonal_sign"],
+                   click=f"https://finance.yahoo.com/quote/{urllib.parse.quote(t)}", dry_run=dry_run)
+            armed[t] = True
+        elif q["price"] > stop * 1.02:
+            armed[t] = False
 
 
 # ---------------------------------------------------------------- Main
@@ -505,6 +711,11 @@ def main() -> int:
         return 0
 
     check_prices(depot, quotes, state, now.strftime("%Y-%m-%d"), args.dry_run)
+    check_auto_stops(depot, quotes, state, args.dry_run)
+    try:
+        depot["_termine"] = check_earnings(depot, state, now, args.dry_run)
+    except Exception as e:  # noqa: BLE001
+        log(f"Zahlen-Termine fehlgeschlagen: {e}")
     if now.weekday() < 5:
         maybe_summary(depot, quotes, state, now, args.dry_run)
     check_news(depot, quotes, state, now, args.dry_run)

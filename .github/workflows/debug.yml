@@ -1,0 +1,18 @@
+name: debug
+on: workflow_dispatch
+jobs:
+  d:
+    runs-on: ubuntu-latest
+    steps:
+      - run: pip install -q pandas lxml requests
+      - run: |
+          python - <<'PY'
+          import pandas as pd, requests, io
+          H={"User-Agent":"aktientracker/1.0 (school project)"}
+          for p in ["DAX","MDAX","TecDAX","EURO_STOXX_50","Nasdaq-100","Dow_Jones_Industrial_Average"]:
+              html=requests.get(f"https://en.wikipedia.org/wiki/{p}",headers=H,timeout=30).text
+              for i,t in enumerate(pd.read_html(io.StringIO(html))):
+                  cols=[str(c) for c in t.columns]
+                  if any(k in " ".join(cols).lower() for k in ("ticker","symbol")):
+                      print(p,i,len(t),cols); print(t.head(3).to_string()[:600])
+          PY

@@ -43,6 +43,7 @@ jobs:
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           NTFY_TOKEN: ${{ secrets.NTFY_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: python tracker.py ${{ (github.event_name == 'workflow_dispatch' && inputs.test) && '--test' || '' }}
 
       - name: Zustand speichern
