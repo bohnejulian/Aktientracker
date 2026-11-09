@@ -5,6 +5,10 @@ Prüft werktags von 7 bis 23 Uhr alle 15 Minuten eure Aktien und schickt Alarme 
 - 📈📉 **Starke Kursbewegung**: ab ±3 % zum Vortag, dann erneut bei ±5 %, ±7 % … (einmal pro Stufe und Tag)
 - 🎯 **Kursmarken**: wenn ein selbst gesetzter Kurs (`ueber` / `unter`) gerissen wird
 - 📰 **News**: neue Schlagzeilen zu euren Aktien, eurer Watchlist und dem Gesamtmarkt (Google News)
+- 💡 **Kaufideen**: werktags 8:30 Scan über DAX, MDAX, TecDAX, EuroStoxx50, Nasdaq 100 und Dow (ca. 250 Aktien), Top 5 mit Begründung und Betrag
+- 🗓 **Quartalszahlen**: Warnung am Vortag (freitags fürs Wochenende/Montag)
+- 🛑 **Auto-Stop-Loss**: nachgezogener Stop pro Position, Alarm wenn er gerissen wird
+- 🤖 **KI-News** (optional): mit Secret `ANTHROPIC_API_KEY` bewertet Claude jede Schlagzeile nach Relevanz und Richtung und filtert Rauschen raus
 - 📊 **Depot-Übersicht**: werktags um 9:15 und 17:45 Uhr, mit Klumpenrisiko-Warnung
 
 Jeder Kurs- und News-Alarm enthält eine kurze **Einschätzung** nach festen Chart-Regeln:
@@ -34,3 +38,7 @@ Es reicht die ISIN aus dem Planspiel, den Kurs sucht der Tracker selbst (bevorzu
 - GitHub startet geplante Läufe manchmal ein paar Minuten zu spät, das ist normal.
 - Yahoo-Kurse können bis zu 15 Minuten verzögert sein. Die Kurse im Planspiel selbst sind maßgeblich.
 - GitHub pausiert geplante Workflows, wenn 60 Tage lang nichts am Repo geändert wurde. Wer regelmäßig `depot.yaml` pflegt, merkt davon nichts.
+
+## Manuell auslösen
+
+Actions → „Aktien-Tracker“ → Run workflow: „Testnachricht“ schickt Übersicht + Beispiel, „Kaufideen-Scan“ startet den Scan sofort.
