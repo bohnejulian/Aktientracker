@@ -13,11 +13,11 @@
 
 # Geld, das der Bot für Kaufvorschläge verplanen darf (€).
 # Er schlägt nie mehr vor, als hier frei ist. Nach einem Kauf bitte runtersetzen.
-budget: 10000
+budget: 9965.84
 
 # Aus dem Planspiel (Stand 09.11.2026 17:53): für Wochenrückblick und Endspurt
 startkapital: 50000
-barbestand: 14806.68
+barbestand: 14772.52
 
 positionen:
   - name: Deka Nasdaq-100 ETF
@@ -127,6 +127,15 @@ positionen:
     sektor: Tech
 
 # Aktien, die ihr nicht besitzt, aber beobachten wollt (gleiches Format, ohne stueck/kaufkurs)
+  - name: E.ON
+    ticker: EOAN.DE
+    stueck: 1
+    kaufkurs: 19.16
+    kaufdatum: '2026-11-09'
+    gebuehr_kauf: 15.0
+    news: E.ON
+    bot: true
+    sektor: Energie
 watchlist: []
 #  - name: SAP
 #    isin: DE0007164600
