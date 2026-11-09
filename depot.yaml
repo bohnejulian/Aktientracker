@@ -1,0 +1,91 @@
+# ============================================================
+#  EUER DEPOT – hier nach jedem Kauf/Verkauf anpassen
+#  Stand: 09.11.2026 17:26 (aus dem Planspiel übernommen)
+# ============================================================
+# isin:   steht im Planspiel unter dem Namen. Der Tracker sucht sich damit
+#         selbst den Kurs (bevorzugt Börse Stuttgart, wie im Planspiel).
+# ticker: optional. Nur eintragen, wenn die ISIN-Suche den falschen Kurs findet
+#         (Yahoo-Kürzel, z. B. RHM.SG = Rheinmetall in Stuttgart).
+# news:   Suchbegriff für Nachrichten.
+# ueber / unter: optionale Kursmarken in €. Wird die Marke gerissen, gibt es einen Alarm.
+
+# Geld, das der Bot für Kaufvorschläge verplanen darf (€).
+# Er schlägt nie mehr vor, als hier frei ist. Nach einem Kauf bitte runtersetzen.
+budget: 10000
+
+positionen:
+  - name: Deka Nasdaq-100 ETF
+    isin: DE000ETFL623
+    stueck: 55
+    kaufkurs: 170.88
+    news: Nasdaq 100
+    art: etf
+
+  - name: Deka-Technologie CF
+    isin: DE0005152623
+    stueck: 30
+    kaufkurs: 123.67
+    news: Technologieaktien
+    art: fonds
+
+  - name: First Solar
+    isin: US3364331070
+    stueck: 5
+    kaufkurs: 178.00
+    news: First Solar
+
+  - name: Lufthansa
+    isin: DE0008232125
+    stueck: 10
+    kaufkurs: 8.54
+    news: Lufthansa
+
+  - name: Meta
+    isin: US30303M1027
+    stueck: 10
+    kaufkurs: 550.10
+    news: Meta Platforms
+
+  - name: Nvidia
+    isin: US67066G1040
+    stueck: 45
+    kaufkurs: 158.60
+    news: Nvidia
+
+  - name: Palantir
+    isin: US69608A1088
+    stueck: 10
+    kaufkurs: 151.76
+    news: Palantir
+
+  - name: Rheinmetall
+    isin: DE0007030009
+    stueck: 7
+    kaufkurs: 822.70
+    news: Rheinmetall
+
+  - name: Take-Two Interactive
+    isin: US8740541094
+    stueck: 5
+    kaufkurs: 194.90
+    news: Take-Two
+
+# Aktien, die ihr nicht besitzt, aber beobachten wollt (gleiches Format, ohne stueck/kaufkurs)
+watchlist: []
+#  - name: SAP
+#    isin: DE0007164600
+#    news: SAP
+
+# Allgemeine Markt-News. Leer lassen ([]) zum Abschalten.
+markt_news:
+  - DAX
+  - Nasdaq
+  - Fed Zinsen
+
+einstellungen:
+  bewegung_prozent: 3       # Alarm bei ±3 % zum Vortag, danach je weitere 2 %
+  bewegung_schritt: 2
+  max_news_pro_lauf: 5      # damit das Handy nicht explodiert
+  news_max_alter_stunden: 6 # ältere Artikel werden ignoriert
+  uebersicht_uhrzeiten: ["09:15", "17:45"]   # Depot-Übersicht (deutsche Zeit)
+  max_anteil_pro_kauf: 25   # nie mehr als 25 % des Budgets in einen Kauf
