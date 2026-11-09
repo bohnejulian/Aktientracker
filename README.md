@@ -28,6 +28,17 @@ Kosten: 0 € (läuft auf GitHub Actions, ca. 1.500 der 2.000 Freiminuten pro Mo
 3. **Actions**-Tab → „Aktien-Tracker“ → **Run workflow** (Haken bei „Testnachricht“ lassen).
    Nach ca. 1 Minute sollte „✅ Tracker läuft!“ auf dem Handy erscheinen.
 
+## Drei ntfy-Kanäle
+
+| Kanal | Wofür |
+|---|---|
+| `planspiel-b730f1fbab24` | Alle Alarme, Kaufideen, Übersichten |
+| `planspiel-b730f1fbab24-depot` | Hier schreibt **ihr** rein: `kauf SAP 5`, `kauf SAP 5 274,50`, `verkauf Nvidia alle`, `budget 8000`, `status`, `hilfe` |
+| `planspiel-b730f1fbab24-bot` | Alle 15 Min. (leise) Stand der Bot-Käufe mit Empfehlung und News |
+
+Die „Gekauft“-Knöpfe unter den Kaufideen schicken automatisch die passende Nachricht in den Depot-Kanal.
+Der Bot bucht sie beim nächsten Lauf (max. ~15 Min.) in depot.yaml ein und bestätigt im Hauptkanal.
+
 ## Depot pflegen
 
 Nach jedem Kauf/Verkauf im Planspiel einfach `depot.yaml` bearbeiten (geht direkt auf github.com über das Stift-Symbol).

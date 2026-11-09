@@ -61,20 +61,21 @@ def save_state(state: dict) -> None:
 
 def notify(title: str, message: str, *, priority: int = 3, tags: list[str] | None = None,
            click: str | None = None, actions: list[tuple[str, str]] | None = None,
-           dry_run: bool = False) -> None:
-    """actions: [(Knopf-Text, Nachricht an den Eingangskanal)], max. 3"""
-    topic = os.environ.get("NTFY_TOPIC")
+           channel: str = "", dry_run: bool = False) -> None:
+    """actions: [(Knopf-Text, Nachricht an den Eingangskanal)], max. 3. channel: z. B. "bot" -> <topic>-bot"""
+    base = os.environ.get("NTFY_TOPIC")
+    topic = f"{base}-{channel}" if base and channel else base
     payload = {"topic": topic, "title": title, "message": message, "priority": priority}
     if actions and topic:
         payload["actions"] = [{"action": "http", "label": label[:40], "method": "POST", "clear": True,
-                               "url": f"{NTFY_SERVER}/{topic}-depot", "body": body}
+                               "url": f"{NTFY_SERVER}/{base}-depot", "body": body}
                               for label, body in actions[:3]]
     if tags:
         payload["tags"] = tags
     if click:
         payload["click"] = click
     if dry_run or not topic:
-        log(f"[ntfy {'dry-run' if dry_run else 'KEIN NTFY_TOPIC'}] {title} | {message}"
+        log(f"[ntfy{(' ' + channel) if channel else ''} {'dry-run' if dry_run else 'KEIN NTFY_TOPIC'}] {title} | {message}"
             + (f" | Knöpfe: {actions}" if actions else ""))
         return
     headers = {}
@@ -497,6 +498,15 @@ def check_news(depot: dict, quotes: dict, state: dict, now: datetime, dry_run: b
             seeded.append(query)
 
     ratings = ki_rate(depot, fresh) if fresh else None
+    recent = state.setdefault("recent_news", {})
+    for n, (label, title, link, item) in enumerate(fresh):
+        r = ratings.get(n) if ratings else None
+        recent.setdefault(label, []).append({"t": now.timestamp(), "title": title.rsplit(" - ", 1)[0],
+                                             **({k: r[k] for k in ("relevanz", "richtung", "einschaetzung")} if r else {})})
+    for label in list(recent):
+        recent[label] = [x for x in recent[label] if x["t"] > now.timestamp() - 86400][-5:]
+        if not recent[label]:
+            del recent[label]
     if ratings is not None:
         min_rel = int(cfg.get("ki_min_relevanz", 3))
         kept = []
@@ -749,6 +759,58 @@ def maybe_scan(depot: dict, state: dict, now: datetime, dry_run: bool, force: bo
            priority=3, tags=["bulb"], actions=buttons, dry_run=dry_run)
 
 
+# ---------------------------------------------------------------- Bot-Kanal
+
+def bot_update(depot: dict, quotes: dict, state: dict, now: datetime, dry_run: bool) -> None:
+    """Alle 15 Min. Stand der Positionen, die über den Bot gekauft wurden, an <topic>-bot."""
+    bot_pos = [p for p in depot.get("positionen") or [] if p.get("bot")]
+    if not bot_pos:
+        return
+    recent = state.get("recent_news", {})
+    total_v = total_c = total_d = 0.0
+    blocks = []
+    for p in bot_pos:
+        q = quotes.get(p.get("ticker"))
+        name = p.get("name", p.get("ticker"))
+        if not q:
+            blocks.append(f"{name}: kein Kurs")
+            continue
+        n, k = float(p.get("stueck", 0)), float(p.get("kaufkurs", q["price"]))
+        v, c, d = n * q["price"], n * k, n * (q["price"] - q["prev_close"])
+        total_v, total_c, total_d = total_v + v, total_c + c, total_d + d
+        a = analyse(q["closes"])
+        stop = float(p["unter"]) if p.get("unter") is not None else stop_level(q)
+        up = a["sma200"] is not None and q["price"] > a["sma200"]
+        if q["price"] <= stop:
+            rec = "🛑 Unter Stop – Verkauf prüfen"
+        elif a["rsi"] >= 70:
+            rec = "🟡 Halten, überkauft – Teilgewinn möglich, nicht nachkaufen"
+        elif a["rsi"] <= 35 and up:
+            rec = "🟢 Rücksetzer im Aufwärtstrend – Nachkauf möglich"
+        elif not up:
+            rec = "🟠 Halten mit Stop, kein Nachkauf (Abwärtstrend)"
+        else:
+            rec = "⚪ Halten"
+        news = recent.get(name, [])
+        strong = [x for x in news if x.get("relevanz", 0) >= 4]
+        if any(x.get("richtung") == "negativ" for x in strong):
+            rec = "⚠️ Wichtige negative News – lesen, ggf. Stop enger setzen"
+        elif any(x.get("richtung") == "positiv" for x in strong) and not rec.startswith(("🛑", "🟡")):
+            rec += " · 📰 starke positive News"
+        line = (f"{name}: {eur(q['price'])} € ({pct((q['price'] / q['prev_close'] - 1) * 100)} heute, "
+                f"{pct((q['price'] / k - 1) * 100)} seit Kauf = {'+' if v - c >= 0 else ''}{eur(v - c)} €)\n"
+                f"   {rec} · Stop {eur(stop)}")
+        for x in sorted(news, key=lambda x: (-x.get("relevanz", 0), -x["t"]))[:2]:
+            tag = f"🤖{x['relevanz']}/5 {x['richtung']}: " if x.get("relevanz") else ""
+            line += f"\n   📰 {tag}{x['title'][:110]}"
+        blocks.append(line)
+    head = (f"Bot-Depot: {eur(total_v)} € · heute {'+' if total_d >= 0 else ''}{eur(total_d)} € · "
+            f"gesamt {pct((total_v / total_c - 1) * 100) if total_c else '–'}"
+            f" · freies Budget {eur(float(depot.get('budget') or 0))} €")
+    notify(f"🤖 Bot-Käufe {now:%H:%M}", head + "\n\n" + "\n\n".join(blocks) + DISCLAIMER,
+           priority=1, tags=["robot"], channel="bot", dry_run=dry_run)
+
+
 # ---------------------------------------------------------------- Main
 
 def main() -> int:
@@ -809,6 +871,8 @@ def main() -> int:
         except Exception as e:  # noqa: BLE001
             log(f"Scan fehlgeschlagen: {e}")
     check_news(depot, quotes, state, now, args.dry_run)
+    if now.weekday() < 5 and 8 <= now.hour < 23:
+        bot_update(depot, quotes, state, now, args.dry_run)
 
     if tickers and not quotes:
         fails = state.get("quote_fail_runs", 0) + 1

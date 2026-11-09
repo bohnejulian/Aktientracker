@@ -176,13 +176,14 @@ def process(depot_file: Path, msgs: list[dict], state: dict, fetch_quotes, notif
             if not n:
                 continue
             if pos:
+                pos["bot"] = True
                 old_n = float(pos.get("stueck", 0))
                 old_k = float(pos.get("kaufkurs", price))
                 pos["stueck"] = _int_or(old_n + n)
                 pos["kaufkurs"] = round((old_n * old_k + n * price) / (old_n + n), 2)
             else:
                 new = {"name": name, "ticker": ticker, "stueck": _int_or(n), "kaufkurs": round(price, 2),
-                       "news": name}
+                       "news": name, "bot": True}
                 if ticker in ideas and ideas[ticker].get("heimat"):
                     new["heimat"] = ideas[ticker]["heimat"]
                 positions.append(new)
