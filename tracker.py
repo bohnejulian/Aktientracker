@@ -924,7 +924,8 @@ def odds_text(g: dict, price: float) -> str:
 
 # ---------------------------------------------------------------- Kaufideen-Scan
 
-def maybe_scan(depot: dict, state: dict, now: datetime, dry_run: bool, force: bool = False) -> None:
+def maybe_scan(depot: dict, state: dict, now: datetime, dry_run: bool, force: bool = False,
+               example: str | None = None) -> None:
     """Scannt zu festen Zeiten, meldet sich aber NUR bei wirklich starken, neuen Kaufideen."""
     cfg = depot.get("einstellungen") or {}
     times = cfg.get("scan_uhrzeiten") or ([cfg["scan_uhrzeit"]] if cfg.get("scan_uhrzeit") else [])
@@ -936,7 +937,7 @@ def maybe_scan(depot: dict, state: dict, now: datetime, dry_run: bool, force: bo
         slot = now.replace(hour=h, minute=m, second=0, microsecond=0)
         if slot <= now < slot + timedelta(hours=2) and f"{today} {hhmm}" not in done:
             due = f"{today} {hhmm}"
-    if not force and not due:
+    if not force and not due and not example:
         return
     if due:
         done.append(due)
@@ -949,10 +950,12 @@ def maybe_scan(depot: dict, state: dict, now: datetime, dry_run: bool, force: bo
         uni = {"week": now.strftime("%G-%V"), "items": {t: list(v) for t, v in loaded.items()}}
         state["universe"] = uni
     universe = {t: tuple(v) for t, v in uni["items"].items()}
+    if example:
+        universe = {example: universe.get(example, (example, "Beispiel"))}
     held = {i.get("ticker") for i in all_items(depot)} | {i.get("heimat") for i in all_items(depot)}
     budget = float(depot.get("budget") or 0)
     ideas = scanner.scan(universe, held, analyse, fx_rate, budget,
-                         float(cfg.get("max_anteil_pro_kauf", 35)) / 100, log, 20)
+                         float(cfg.get("max_anteil_pro_kauf", 35)) / 100, log, 20, force=bool(example))
     min_score = float(cfg.get("scan_min_score", 30))
     sent = state.setdefault("ideas_sent", {})
     for t in [t for t, d in sent.items() if (now.date() - datetime.fromisoformat(d).date()).days > 7]:
@@ -964,6 +967,7 @@ def maybe_scan(depot: dict, state: dict, now: datetime, dry_run: bool, force: bo
             return
         min_score += 5
         ideas = [i for i in ideas if i["vol"] < 0.35]
+    raw = list(ideas)
     ideas = [i for i in ideas if i["n"] * i["price"] >= min_trade(cfg) and i["t"] not in sent]
     # Klumpenrisiko: Ideen aus schon übergewichteten Branchen abwerten, andere bevorzugen
     weights = sector_weights(depot, LAST_QUOTES, state)
@@ -979,16 +983,24 @@ def maybe_scan(depot: dict, state: dict, now: datetime, dry_run: bool, force: bo
         elif share < 0.15:
             i["score"] += 3  # neue Branche = breiter aufgestellt
     ideas.sort(key=lambda x: -x["score"])
-    ideas = [i for i in ideas if i["score"] >= min_score][:int(cfg.get("scan_anzahl", 2))]
+    if example:
+        ideas = [i for i in sorted(raw, key=lambda x: -x["score"])][:1]
+        for i in ideas:
+            i["sektor"] = sector_lookup(i["t"], state)
+            if weights.get(i["sektor"] or "", 0) > limit:
+                i["klumpen"] = weights[i["sektor"]]
+    else:
+        ideas = [i for i in ideas if i["score"] >= min_score][:int(cfg.get("scan_anzahl", 2))]
     log(f"Scan: {len(ideas)} starke neue Ideen (Schwelle {min_score})")
     if not ideas:
         return  # keine Mitteilung – nur melden, wenn es wirklich etwas Gutes gibt
-    for i in ideas:
+    for i in ideas if not example else []:
         sent[i["t"]] = today
     stats = load_stats()
     for i in ideas:
         i["odds"] = idea_odds(i, stats)
-    state["last_ideas"] = {i["t"]: {"name": i["name"], "price": i["price"],
+    if not example:
+      state["last_ideas"] = {i["t"]: {"name": i["name"], "price": i["price"],
                                     **({"ziel_prozent": i["odds"]["best"]} if i.get("odds") and i["odds"]["best"] else {}),
                                     **({"sektor": i["sektor"]} if i.get("sektor") else {}),
                                     **({"heimat": i["t"]} if "." not in i["t"] else {})} for i in ideas}
@@ -1015,8 +1027,8 @@ def maybe_scan(depot: dict, state: dict, now: datetime, dry_run: bool, force: bo
         if i.get("klumpen"):
             body.append(f"⚠️ Ihr habt schon {i['klumpen'] * 100:.0f} % {i['sektor']}, das erhöht das Klumpenrisiko.")
         body.append(IDEA_NOTE.strip())
-        btn = [(f"Gekauft: {i['n']}× {i['name']}", f"kauf {i['t']} {i['n']}")] if i["n"] >= 1 else None
-        notify(f"💡 Kaufidee: {i['name']}", "\n".join(body), priority=4, tags=["bulb"], actions=btn,
+        btn = [(f"Gekauft: {i['n']}× {i['name']}", f"kauf {i['t']} {i['n']}")] if i["n"] >= 1 and not example else None
+        notify(f"{'🧪 BEISPIEL – ' if example else '💡 '}Kaufidee: {i['name']}", "\n".join(body), priority=4, tags=["bulb"], actions=btn,
                attach=chart_url({"closes": i["closes"], "dates": i["dates"]}, 504, f"{i['name']} – 2 Jahre",
                                 [("Stop", i["stop"], "#dc2626")], sma200=True),
                click=f"https://finance.yahoo.com/quote/{urllib.parse.quote(i['t'])}", dry_run=dry_run)
@@ -1151,6 +1163,7 @@ def main() -> int:
     ap.add_argument("--test", action="store_true", help="Test-Mitteilung + Übersicht senden")
     ap.add_argument("--dry-run", action="store_true", help="nichts senden, nur anzeigen")
     ap.add_argument("--scan", action="store_true", help="Kaufideen-Scan sofort ausführen")
+    ap.add_argument("--beispiel", metavar="TICKER", help="Beispiel-Kaufidee für eine Aktie schicken")
     ap.add_argument("--review", action="store_true", help="Wochenrückblick sofort schicken")
     args = ap.parse_args()
 
@@ -1188,6 +1201,11 @@ def main() -> int:
             log(f"  {p['name']}: {q['price']:.2f} € ({q.get('quelle', p['ticker'])}), heute "
                 f"{(q['price'] / q['prev_close'] - 1) * 100:+.2f} %, seit Kauf "
                 f"{(q['price'] * float(p['stueck']) / cost_basis(p) - 1) * 100:+.2f} %")
+
+    if args.beispiel:
+        maybe_scan(depot, state, now, args.dry_run, example=args.beispiel)
+        save_state(state)
+        return 0
 
     if args.scan:
         maybe_scan(depot, state, now, args.dry_run, force=True)

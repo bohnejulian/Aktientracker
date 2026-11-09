@@ -118,7 +118,8 @@ def signal(closes: list[float], analyse) -> dict | None:
     return {"kind": kind, "score": score, "why": why, "vol": vol}
 
 
-def scan(universe: dict, held: set[str], analyse, fx_rate, budget: float, max_share: float, log, top: int = 5):
+def scan(universe: dict, held: set[str], analyse, fx_rate, budget: float, max_share: float, log, top: int = 5,
+         force: bool = False):
     import yfinance as yf
 
     tickers = sorted(universe)
@@ -137,6 +138,9 @@ def scan(universe: dict, held: set[str], analyse, fx_rate, budget: float, max_sh
         if len(closes) < 210:
             continue
         sig = signal(closes, analyse)
+        if not sig and force:  # nur für Beispielnachrichten
+            sig = {"kind": "Kein Signal (nur Beispiel)", "score": 0, "vol": analyse(closes)["vol"],
+                   "why": "Gerade erfüllt die Aktie keine Kaufregel, das hier zeigt nur das Format."}
         if not sig:
             continue
         name, idx = universe[t]

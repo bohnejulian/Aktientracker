@@ -20,6 +20,10 @@ on:
         description: "Wochenrückblick jetzt schicken?"
         type: boolean
         default: false
+      beispiel:
+        description: "Beispiel-Kaufidee für dieses Yahoo-Kürzel schicken (z. B. ALV.DE), sonst leer"
+        type: string
+        default: ""
 
 concurrency:
   group: tracker
@@ -56,7 +60,7 @@ jobs:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           NTFY_TOKEN: ${{ secrets.NTFY_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: python tracker.py ${{ (github.event_name == 'workflow_dispatch' && inputs.scan) && '--scan' || ((github.event_name == 'workflow_dispatch' && inputs.test) && '--test' || '') }} ${{ (github.event_name == 'workflow_dispatch' && inputs.review) && '--review' || '' }}
+        run: python tracker.py ${{ (github.event_name == 'workflow_dispatch' && inputs.scan) && '--scan' || ((github.event_name == 'workflow_dispatch' && inputs.test) && '--test' || '') }} ${{ (github.event_name == 'workflow_dispatch' && inputs.review) && '--review' || '' }} ${{ (github.event_name == 'workflow_dispatch' && inputs.beispiel != '') && format('--beispiel {0}', inputs.beispiel) || '' }}
 
       - name: Depot-Änderungen speichern
         if: always()
