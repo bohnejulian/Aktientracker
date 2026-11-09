@@ -8,10 +8,10 @@ jobs:
       - run: |
           python - <<'PY'
           import yfinance as yf
-          for q in ["Deka Nasdaq-100", "Deka Technologie", "ETFL62", "515262", "Deka-Technologie CF"]:
+          for q in ["Take-Two Interactive", "TAKE-TWO INTERACT"]:
               try: print(q, [(x.get("symbol"), x.get("exchange"), x.get("quoteType")) for x in yf.Search(q, max_results=15, news_count=0).quotes])
               except Exception as e: print(q, e)
-          for s in ["D6RG.F","DE000ETFL623.SG","EL4R.DE","ELFA.DE","EL4X.DE","0P00000AXG.F","EURUSD=X","NVD.DE","FB2A.DE","PTX.DE","F3A.DE"]:
+          for s in ["D6RH.DE","D6RH.MU","0P00000EK2.F","D6RG.MU","D6RG.DU","D6RG.SG","TKE.DE","TKE.F","TWO.DE","TTWO.DE","LHA.DE","RHM.DE"]:
               try:
                   h=yf.Ticker(s).history(period="3mo")["Close"].dropna()
                   print(s, len(h), h.iloc[-1] if len(h) else None, yf.Ticker(s).fast_info.get("currency"))
